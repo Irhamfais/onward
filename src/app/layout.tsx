@@ -29,8 +29,8 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="id" className={`${plusJakartaSans.variable} ${inter.variable}`}>
-      <body className="bg-page-background text-text-primary min-h-screen">
+    <html lang="id" className={`${plusJakartaSans.variable} ${inter.variable}`} suppressHydrationWarning>
+      <body className="bg-page-background text-text-primary min-h-screen" suppressHydrationWarning>
         <AppProvider>
           <AppShell>{children}</AppShell>
         </AppProvider>
