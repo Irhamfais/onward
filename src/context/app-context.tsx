@@ -35,6 +35,7 @@ interface AppContextType {
     completed: number;
     completionPercentage: number;
   };
+  updateProfile: (updated: Partial<UserProfile>) => Promise<boolean>;
 }
 
 const AppContext = createContext<AppContextType | undefined>(undefined);
@@ -274,6 +275,44 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
   };
 
+  const updateProfile = async (updated: Partial<UserProfile>): Promise<boolean> => {
+    if (!user) return false;
+    try {
+      const merged: UserProfile = {
+        id: user.id,
+        name: updated.name ?? profile?.name ?? 'Mahasiswa',
+        email: user.email ?? profile?.email ?? '',
+        major: updated.major ?? profile?.major ?? 'Mahasiswa Onward',
+        semester: updated.semester ?? profile?.semester ?? 1,
+        phone_wa: updated.phone_wa ?? profile?.phone_wa ?? '',
+        is_wa_verified: updated.is_wa_verified ?? profile?.is_wa_verified ?? false,
+        avatar_url: updated.avatar_url ?? profile?.avatar_url,
+      };
+      setProfile(merged);
+
+      const { error } = await supabase
+        .from('profiles')
+        .upsert({
+          id: user.id,
+          name: merged.name,
+          email: merged.email,
+          phone_wa: merged.phone_wa,
+          major: merged.major,
+          semester: merged.semester,
+          is_wa_verified: merged.is_wa_verified,
+          updated_at: new Date().toISOString(),
+        });
+
+      if (error) {
+        console.warn('Could not sync to Supabase profiles:', error.message);
+      }
+      return true;
+    } catch (e) {
+      console.error('Update profile error:', e);
+      return false;
+    }
+  };
+
   const total = tasks.length;
   const notStarted = tasks.filter((t) => t.status === 'BELUM_MULAI').length;
   const inProgress = tasks.filter((t) => t.status === 'SEDANG_DIKERJAKAN').length;
@@ -302,6 +341,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         addCourse,
         addCompetition,
         addCommittee,
+        updateProfile,
         stats: { total, notStarted, inProgress, completed, completionPercentage },
       }}
     >
