@@ -2,7 +2,7 @@
 
 import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
 import { User } from '@supabase/supabase-js';
-import { UnifiedTask, Course, Competition, Committee, TaskStatus, UserProfile } from '@/types';
+import { UnifiedTask, Course, Competition, Committee, TaskStatus, UserProfile, Semester } from '@/types';
 import { createClient } from '@/lib/supabase/client';
 
 interface AppContextType {
@@ -17,6 +17,12 @@ interface AppContextType {
   courses: Course[];
   competitions: Competition[];
   committees: Committee[];
+  semesters: Semester[];
+  activeSemesterId: string | null;
+  setActiveSemesterId: (id: string) => void;
+  addSemester: (sem: Omit<Semester, 'id'>) => void;
+  archiveSemester: (id: string) => void;
+
   searchQuery: string;
   setSearchQuery: (q: string) => void;
   isSidebarCollapsed: boolean;
@@ -24,8 +30,11 @@ interface AppContextType {
   toggleSidebar: () => void;
   cycleTaskStatus: (taskId: string) => void;
   addTask: (task: Omit<UnifiedTask, 'id'>) => void;
+  updateTask: (taskId: string, task: Partial<UnifiedTask>) => void;
   deleteTask: (taskId: string) => void;
   addCourse: (course: Omit<Course, 'id'>) => void;
+  updateCourse: (courseId: string, course: Partial<Course>) => void;
+  deleteCourse: (courseId: string) => void;
   addCompetition: (comp: Omit<Competition, 'id'>) => void;
   addCommittee: (committee: Omit<Committee, 'id'>) => void;
   stats: {
@@ -50,11 +59,18 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [isLoadingAuth, setIsLoadingAuth] = useState(true);
 
+  // Default Semesters
+  const defaultSemesters: Semester[] = [
+    { id: 'sem-ganjil-2026', name: 'Ganjil 2026/2027', is_active: true }
+  ];
+
   // Application Data States (Pure empty arrays, no dummy data)
   const [tasks, setTasks] = useState<UnifiedTask[]>([]);
   const [courses, setCourses] = useState<Course[]>([]);
   const [competitions, setCompetitions] = useState<Competition[]>([]);
   const [committees, setCommittees] = useState<Committee[]>([]);
+  const [semesters, setSemesters] = useState<Semester[]>(defaultSemesters);
+  const [activeSemesterId, setActiveSemesterId] = useState<string | null>('sem-ganjil-2026');
   const [searchQuery, setSearchQuery] = useState('');
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   const [isDataLoaded, setIsDataLoaded] = useState(false);
@@ -104,11 +120,18 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         setCourses(parsed.courses || []);
         setCompetitions(parsed.competitions || []);
         setCommittees(parsed.committees || []);
+        const loadedSemesters: Semester[] = parsed.semesters && parsed.semesters.length > 0
+          ? parsed.semesters
+          : [{ id: 'sem-ganjil-2026', name: 'Ganjil 2026/2027', is_active: true }];
+        setSemesters(loadedSemesters);
+        setActiveSemesterId(parsed.activeSemesterId || loadedSemesters.find(s => s.is_active)?.id || loadedSemesters[0]?.id || null);
       } else {
         setTasks([]);
         setCourses([]);
         setCompetitions([]);
         setCommittees([]);
+        setSemesters([{ id: 'sem-ganjil-2026', name: 'Ganjil 2026/2027', is_active: true }]);
+        setActiveSemesterId('sem-ganjil-2026');
       }
     } catch (e) {
       console.error('Error loading user data:', e);
@@ -182,12 +205,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     if (!user || !isDataLoaded) return;
     try {
       const userKey = `ONWARD_DATA_${user.id}`;
-      const payload = { tasks, courses, competitions, committees };
+      const payload = { tasks, courses, competitions, committees, semesters, activeSemesterId };
       localStorage.setItem(userKey, JSON.stringify(payload));
     } catch (e) {
       console.error('Error saving user data:', e);
     }
-  }, [tasks, courses, competitions, committees, user, isDataLoaded]);
+  }, [tasks, courses, competitions, committees, semesters, activeSemesterId, user, isDataLoaded]);
 
   // Keyboard shortcut Ctrl + B to toggle sidebar
   useEffect(() => {
@@ -207,6 +230,28 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       localStorage.setItem(SIDEBAR_STORAGE_KEY, next.toString());
       return next;
     });
+  };
+
+  const addSemester = (semData: Omit<Semester, 'id'>) => {
+    const newSem: Semester = {
+      ...semData,
+      id: `sem-${Date.now()}`,
+    };
+    setSemesters((prev) => {
+      if (newSem.is_active) {
+        return [newSem, ...prev.map((s) => ({ ...s, is_active: false }))];
+      }
+      return [...prev, newSem];
+    });
+    if (newSem.is_active) {
+      setActiveSemesterId(newSem.id);
+    }
+  };
+
+  const archiveSemester = (id: string) => {
+    setSemesters((prev) =>
+      prev.map((s) => (s.id === id ? { ...s, is_active: false } : s))
+    );
   };
 
   const cycleTaskStatus = (taskId: string) => {
@@ -231,6 +276,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setTasks((prev) => [newTask, ...prev]);
   };
 
+  const updateTask = (taskId: string, taskData: Partial<UnifiedTask>) => {
+    setTasks((prev) =>
+      prev.map((t) => (t.id === taskId ? { ...t, ...taskData } : t))
+    );
+  };
+
   const deleteTask = (taskId: string) => {
     setTasks((prev) => prev.filter((t) => t.id !== taskId));
   };
@@ -239,8 +290,25 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     const newCourse: Course = {
       ...courseData,
       id: `c-${Date.now()}`,
+      semester_id: courseData.semester_id || activeSemesterId || undefined,
     };
     setCourses((prev) => [...prev, newCourse]);
+  };
+
+  const updateCourse = (courseId: string, courseData: Partial<Course>) => {
+    setCourses((prev) =>
+      prev.map((c) => (c.id === courseId ? { ...c, ...courseData } : c))
+    );
+    if (courseData.course_name) {
+      setTasks((prev) =>
+        prev.map((t) => (t.parent_id === courseId ? { ...t, parent_title: courseData.course_name! } : t))
+      );
+    }
+  };
+
+  const deleteCourse = (courseId: string) => {
+    setCourses((prev) => prev.filter((c) => c.id !== courseId));
+    setTasks((prev) => prev.filter((t) => t.parent_id !== courseId));
   };
 
   const addCompetition = (compData: Omit<Competition, 'id'>) => {
@@ -330,6 +398,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         courses,
         competitions,
         committees,
+        semesters,
+        activeSemesterId,
+        setActiveSemesterId,
+        addSemester,
+        archiveSemester,
         searchQuery,
         setSearchQuery,
         isSidebarCollapsed,
@@ -337,8 +410,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         toggleSidebar,
         cycleTaskStatus,
         addTask,
+        updateTask,
         deleteTask,
         addCourse,
+        updateCourse,
+        deleteCourse,
         addCompetition,
         addCommittee,
         updateProfile,

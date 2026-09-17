@@ -15,8 +15,19 @@ export interface UnifiedTask {
   user_id?: string;
 }
 
+export interface Semester {
+  id: string;
+  user_id?: string;
+  name: string; // Misal: "Ganjil 2026/2027"
+  is_active: boolean;
+  start_date?: string;
+  end_date?: string;
+  created_at?: string;
+}
+
 export interface Course {
   id: string;
+  semester_id?: string;
   course_name: string;
   day_of_week: number; // 1 = Senin ... 7 = Minggu
   start_time: string;
@@ -27,6 +38,7 @@ export interface Course {
   color_code?: string;
   type?: string;
   time?: string;
+  is_recurring?: boolean;
   hasPendingTask?: boolean;
 }
 
