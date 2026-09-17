@@ -79,3 +79,15 @@ export interface CommitteeMeeting {
   is_recurring?: boolean;
 }
 
+export interface UserProfile {
+  id: string;
+  name: string;
+  email: string;
+  phone_wa?: string;
+  is_wa_verified?: boolean;
+  avatar_url?: string;
+  major?: string;
+  semester?: number;
+}
+
+

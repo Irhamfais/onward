@@ -97,14 +97,37 @@ export default function KepanitiaanPage() {
             Ringkasan Organisasi
           </span>
           <p className="text-xs md:text-sm font-medium text-text-primary">
-            2 Kepanitiaan Aktif · 1 Kepanitiaan Selesai · 1 Rapat Minggu Ini · 6 dari 13 Job Desc Selesai
+            {committees.length > 0
+              ? `${committees.filter((c) => c.status !== 'Arsip Selesai' && c.progressPct !== 100).length} Kepanitiaan Aktif · ${committees.filter((c) => c.status === 'Arsip Selesai' || c.progressPct === 100).length} Kepanitiaan Selesai`
+              : 'Belum ada kepanitiaan yang didaftarkan. Tambahkan kepanitiaan pertama Anda.'}
           </p>
         </div>
       </div>
 
       {/* 3. Single-Column Wide Horizontal Cards (Exact 60:40 Split from Stitch) */}
       <div className="flex flex-col gap-6 w-full pt-2">
-        {committees.map((comm) => {
+        {committees.length === 0 ? (
+          <div className="bg-surface-card rounded-2xl border-2 border-dashed border-border-subtle p-10 flex flex-col items-center justify-center text-center card-spec">
+            <div className="w-12 h-12 rounded-full bg-category-kepanitiaan-tint text-category-kepanitiaan flex items-center justify-center mb-3">
+              <Users size={24} weight="bold" />
+            </div>
+            <h3 className="font-display font-semibold text-base text-text-primary">
+              Belum Ada Kepanitiaan
+            </h3>
+            <p className="text-xs text-text-secondary max-w-sm mt-1 mb-4">
+              Catat organisasi atau kepanitiaan aktifmu untuk memantau rapat, job desc, dan masa kepengurusan.
+            </p>
+            <button
+              type="button"
+              onClick={() => setIsModalOpen(true)}
+              className="inline-flex items-center gap-2 bg-primary hover:bg-primary-dark text-white text-xs font-semibold px-4 py-2.5 rounded-xl shadow-xs transition-all cursor-pointer"
+            >
+              <Plus size={16} weight="bold" />
+              <span>Tambah Kepanitiaan Sekarang</span>
+            </button>
+          </div>
+        ) : (
+          committees.map((comm) => {
           const isDone = comm.status === 'Arsip Selesai' || comm.progressPct === 100;
           const isVideo = comm.meetingLocation?.toLowerCase().includes('zoom') || comm.meetingLocation?.toLowerCase().includes('meet');
 
@@ -275,7 +298,8 @@ export default function KepanitiaanPage() {
               </div>
             </div>
           );
-        })}
+        })
+      )}
       </div>
 
       {/* ==================== MODAL TAMBAH KEPANITIAAN ==================== */}

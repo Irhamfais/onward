@@ -1,10 +1,18 @@
 'use client';
 
-import React, { createContext, useContext, useState, useEffect } from 'react';
-import { UnifiedTask, Course, Competition, Committee, TaskStatus, TaskCategory } from '@/types';
-import { INITIAL_TASKS, INITIAL_COURSES, INITIAL_COMPETITIONS, INITIAL_COMMITTEES } from '@/lib/constants';
+import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
+import { User } from '@supabase/supabase-js';
+import { UnifiedTask, Course, Competition, Committee, TaskStatus, UserProfile } from '@/types';
+import { createClient } from '@/lib/supabase/client';
 
 interface AppContextType {
+  // Auth state
+  user: User | null;
+  profile: UserProfile | null;
+  isLoadingAuth: boolean;
+  signOut: () => Promise<void>;
+
+  // Core Data
   tasks: UnifiedTask[];
   courses: Course[];
   competitions: Competition[];
@@ -20,7 +28,6 @@ interface AppContextType {
   addCourse: (course: Omit<Course, 'id'>) => void;
   addCompetition: (comp: Omit<Competition, 'id'>) => void;
   addCommittee: (committee: Omit<Committee, 'id'>) => void;
-  resetDemoData: () => void;
   stats: {
     total: number;
     notStarted: number;
@@ -32,51 +39,154 @@ interface AppContextType {
 
 const AppContext = createContext<AppContextType | undefined>(undefined);
 
-const STORAGE_KEY = 'ONWARD_APP_STATE_V2';
 const SIDEBAR_STORAGE_KEY = 'ONWARD_SIDEBAR_COLLAPSED';
 
 export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const [tasks, setTasks] = useState<UnifiedTask[]>(INITIAL_TASKS);
-  const [courses, setCourses] = useState<Course[]>(INITIAL_COURSES);
-  const [competitions, setCompetitions] = useState<Competition[]>(INITIAL_COMPETITIONS);
-  const [committees, setCommittees] = useState<Committee[]>(INITIAL_COMMITTEES);
+  const supabase = createClient();
+
+  // Auth States
+  const [user, setUser] = useState<User | null>(null);
+  const [profile, setProfile] = useState<UserProfile | null>(null);
+  const [isLoadingAuth, setIsLoadingAuth] = useState(true);
+
+  // Application Data States (Pure empty arrays, no dummy data)
+  const [tasks, setTasks] = useState<UnifiedTask[]>([]);
+  const [courses, setCourses] = useState<Course[]>([]);
+  const [competitions, setCompetitions] = useState<Competition[]>([]);
+  const [committees, setCommittees] = useState<Committee[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
-  const [isInitialized, setIsInitialized] = useState(false);
+  const [isDataLoaded, setIsDataLoaded] = useState(false);
 
-  // Load initial data from localStorage
-  useEffect(() => {
+  // Helper to load user profile
+  const loadUserProfile = useCallback(async (userId: string, email?: string, metadata?: any) => {
     try {
-      const savedState = localStorage.getItem(STORAGE_KEY);
-      if (savedState) {
-        const parsed = JSON.parse(savedState);
-        if (parsed.tasks) setTasks(parsed.tasks);
-        if (parsed.courses) setCourses(parsed.courses);
-        if (parsed.competitions) setCompetitions(parsed.competitions);
-        if (parsed.committees) setCommittees(parsed.committees);
-      }
+      const { data, error } = await supabase
+        .from('profiles')
+        .select('*')
+        .eq('id', userId)
+        .maybeSingle();
 
-      const savedSidebar = localStorage.getItem(SIDEBAR_STORAGE_KEY);
-      if (savedSidebar === 'true' && window.innerWidth >= 768) {
-        setIsSidebarCollapsed(true);
+      if (data && !error) {
+        setProfile(data as UserProfile);
+      } else {
+        // Fallback to auth metadata
+        const fallbackName = metadata?.full_name || metadata?.name || email?.split('@')[0] || 'Mahasiswa';
+        setProfile({
+          id: userId,
+          name: fallbackName,
+          email: email || '',
+          major: metadata?.major || 'Mahasiswa Onward',
+          is_wa_verified: false,
+        });
+      }
+    } catch {
+      const fallbackName = metadata?.full_name || metadata?.name || email?.split('@')[0] || 'Mahasiswa';
+      setProfile({
+        id: userId,
+        name: fallbackName,
+        email: email || '',
+        major: metadata?.major || 'Mahasiswa Onward',
+        is_wa_verified: false,
+      });
+    }
+  }, [supabase]);
+
+  // Helper to load user data from user-scoped storage
+  const loadUserData = useCallback((userId: string) => {
+    try {
+      const userKey = `ONWARD_DATA_${userId}`;
+      const saved = localStorage.getItem(userKey);
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        setTasks(parsed.tasks || []);
+        setCourses(parsed.courses || []);
+        setCompetitions(parsed.competitions || []);
+        setCommittees(parsed.committees || []);
+      } else {
+        setTasks([]);
+        setCourses([]);
+        setCompetitions([]);
+        setCommittees([]);
       }
     } catch (e) {
-      console.error('Failed to load saved state from localStorage:', e);
+      console.error('Error loading user data:', e);
     } finally {
-      setIsInitialized(true);
+      setIsDataLoaded(true);
     }
   }, []);
 
-  // Save to localStorage whenever core data changes
+  // Sync session and auth state on mount
   useEffect(() => {
-    if (!isInitialized) return;
+    let mounted = true;
+
+    const initAuth = async () => {
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        if (mounted) {
+          const currentUser = session?.user ?? null;
+          setUser(currentUser);
+          if (currentUser) {
+            await loadUserProfile(currentUser.id, currentUser.email, currentUser.user_metadata);
+            loadUserData(currentUser.id);
+          } else {
+            setIsDataLoaded(true);
+          }
+        }
+      } catch (err) {
+        console.error('Auth initialization error:', err);
+      } finally {
+        if (mounted) {
+          setIsLoadingAuth(false);
+        }
+      }
+    };
+
+    initAuth();
+
+    // Listen to Supabase auth changes
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
+      const currentUser = session?.user ?? null;
+      setUser(currentUser);
+      if (currentUser) {
+        await loadUserProfile(currentUser.id, currentUser.email, currentUser.user_metadata);
+        loadUserData(currentUser.id);
+      } else {
+        setProfile(null);
+        setTasks([]);
+        setCourses([]);
+        setCompetitions([]);
+        setCommittees([]);
+        setIsDataLoaded(true);
+      }
+      setIsLoadingAuth(false);
+    });
+
+    // Load sidebar preference
     try {
+      const savedSidebar = localStorage.getItem(SIDEBAR_STORAGE_KEY);
+      if (savedSidebar === 'true' && typeof window !== 'undefined' && window.innerWidth >= 768) {
+        setIsSidebarCollapsed(true);
+      }
+    } catch {}
+
+    return () => {
+      mounted = false;
+      subscription.unsubscribe();
+    };
+  }, [supabase, loadUserProfile, loadUserData]);
+
+  // Save changes to user-scoped storage whenever state changes
+  useEffect(() => {
+    if (!user || !isDataLoaded) return;
+    try {
+      const userKey = `ONWARD_DATA_${user.id}`;
       const payload = { tasks, courses, competitions, committees };
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
+      localStorage.setItem(userKey, JSON.stringify(payload));
     } catch (e) {
-      console.error('Failed to save state to localStorage:', e);
+      console.error('Error saving user data:', e);
     }
-  }, [tasks, courses, competitions, committees, isInitialized]);
+  }, [tasks, courses, competitions, committees, user, isDataLoaded]);
 
   // Keyboard shortcut Ctrl + B to toggle sidebar
   useEffect(() => {
@@ -88,7 +198,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [isSidebarCollapsed]);
+  }, []);
 
   const toggleSidebar = () => {
     setIsSidebarCollapsed((prev) => {
@@ -115,6 +225,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     const newTask: UnifiedTask = {
       ...taskData,
       id: `task-${Date.now()}`,
+      user_id: user?.id,
     };
     setTasks((prev) => [newTask, ...prev]);
   };
@@ -147,12 +258,20 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setCommittees((prev) => [newComm, ...prev]);
   };
 
-  const resetDemoData = () => {
-    setTasks(INITIAL_TASKS);
-    setCourses(INITIAL_COURSES);
-    setCompetitions(INITIAL_COMPETITIONS);
-    setCommittees(INITIAL_COMMITTEES);
-    localStorage.removeItem(STORAGE_KEY);
+  const signOut = async () => {
+    try {
+      await supabase.auth.signOut();
+      setUser(null);
+      setProfile(null);
+      setTasks([]);
+      setCourses([]);
+      setCompetitions([]);
+      setCommittees([]);
+      window.location.href = '/login';
+    } catch (e) {
+      console.error('SignOut error:', e);
+      window.location.href = '/login';
+    }
   };
 
   const total = tasks.length;
@@ -164,6 +283,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   return (
     <AppContext.Provider
       value={{
+        user,
+        profile,
+        isLoadingAuth,
+        signOut,
         tasks,
         courses,
         competitions,
@@ -179,7 +302,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         addCourse,
         addCompetition,
         addCommittee,
-        resetDemoData,
         stats: { total, notStarted, inProgress, completed, completionPercentage },
       }}
     >

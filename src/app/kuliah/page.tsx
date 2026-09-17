@@ -51,9 +51,11 @@ export default function KuliahPage() {
     .filter((t) => t.category === 'KULIAH')
     .sort((a, b) => new Date(a.deadline).getTime() - new Date(b.deadline).getTime());
 
-  const selectedCourseTasks = tasks.filter(
-    (t) => t.parent_title.toLowerCase() === selectedCourse?.course_name.toLowerCase()
-  );
+  const selectedCourseTasks = selectedCourse
+    ? tasks.filter(
+        (t) => t.parent_title?.toLowerCase() === selectedCourse.course_name.toLowerCase()
+      )
+    : [];
 
   const handleCreateCourse = (e: React.FormEvent) => {
     e.preventDefault();

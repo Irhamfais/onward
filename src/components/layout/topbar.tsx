@@ -8,31 +8,44 @@ import {
   Alarm, 
   Trophy, 
   Users, 
-  ArrowCounterClockwise,
   SignOut,
   User,
   Gear
 } from '@phosphor-icons/react';
 import { cn } from '@/lib/utils';
+import { useApp } from '@/context/app-context';
 
 interface TopbarProps {
   onToggleSidebar: () => void;
   searchQuery: string;
   onSearchChange: (query: string) => void;
-  onResetDemoData?: () => void;
 }
 
 export const Topbar: React.FC<TopbarProps> = ({
   onToggleSidebar,
   searchQuery,
   onSearchChange,
-  onResetDemoData,
 }) => {
+  const { user, profile, signOut } = useApp();
   const [isNotifOpen, setIsNotifOpen] = useState(false);
   const [isProfileOpen, setIsProfileOpen] = useState(false);
+  const [isSigningOut, setIsSigningOut] = useState(false);
 
   const notifRef = useRef<HTMLDivElement>(null);
   const profileRef = useRef<HTMLDivElement>(null);
+
+  const displayName = profile?.name || (user?.user_metadata?.full_name as string) || (user?.user_metadata?.name as string) || user?.email?.split('@')[0] || 'Mahasiswa';
+  const displayEmail = user?.email || 'Akun Mahasiswa';
+  const displayMajor = profile?.major || 'Mahasiswa Onward';
+  
+  // 2 initials from display name
+  const initials = displayName
+    .split(' ')
+    .filter(Boolean)
+    .map((n: string) => n[0])
+    .slice(0, 2)
+    .join('')
+    .toUpperCase() || 'ON';
 
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
@@ -46,6 +59,11 @@ export const Topbar: React.FC<TopbarProps> = ({
     document.addEventListener('mousedown', handleClickOutside);
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
+
+  const handleSignOut = async () => {
+    setIsSigningOut(true);
+    await signOut();
+  };
 
   return (
     <header className="sticky top-0 z-40 h-[72px] bg-surface-card border-b border-border-subtle px-4 md:px-8 flex items-center justify-between shadow-[0_1px_8px_rgba(0,0,0,0.03)] gap-4">
@@ -170,22 +188,24 @@ export const Topbar: React.FC<TopbarProps> = ({
             className="flex items-center gap-3 cursor-pointer group text-left p-1 rounded-xl hover:bg-page-background transition-colors"
           >
             <div className="w-9 h-9 rounded-full bg-primary/10 text-primary font-display font-semibold text-sm flex items-center justify-center ring-2 ring-primary/20">
-              AR
+              {initials}
             </div>
             <div className="hidden lg:flex flex-col">
-              <span className="text-sm font-semibold text-text-primary leading-tight">Alya Rahmawati</span>
-              <span className="text-xs text-text-secondary leading-tight">Semester 5 • Fasilkom</span>
+              <span className="text-sm font-semibold text-text-primary leading-tight truncate max-w-[140px]">{displayName}</span>
+              <span className="text-xs text-text-secondary leading-tight truncate max-w-[140px]">{displayMajor}</span>
             </div>
           </button>
 
           {isProfileOpen && (
             <div className="absolute right-0 mt-3 w-56 bg-surface-card rounded-2xl border border-border-subtle shadow-dropdown z-50 p-2 animate-in fade-in zoom-in-95 duration-150">
               <div className="px-3 py-2 border-b border-border-subtle mb-1">
-                <p className="text-xs font-semibold text-text-primary">Alya Rahmawati</p>
-                <p className="text-[11px] text-text-secondary truncate">alya.rahmawati@kampus.ac.id</p>
-                <span className="inline-block mt-1 px-2 py-0.5 rounded-full text-[10px] font-medium bg-category-kuliah-tint text-category-kuliah">
-                  WhatsApp Verified
-                </span>
+                <p className="text-xs font-semibold text-text-primary truncate">{displayName}</p>
+                <p className="text-[11px] text-text-secondary truncate">{displayEmail}</p>
+                {profile?.is_wa_verified && (
+                  <span className="inline-block mt-1 px-2 py-0.5 rounded-full text-[10px] font-medium bg-category-kuliah-tint text-category-kuliah">
+                    WhatsApp Verified
+                  </span>
+                )}
               </div>
 
               <div className="flex flex-col gap-0.5 text-xs font-medium text-text-secondary">
@@ -204,28 +224,16 @@ export const Topbar: React.FC<TopbarProps> = ({
                   <span>Preferensi Notifikasi</span>
                 </button>
 
-                {onResetDemoData && (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setIsProfileOpen(false);
-                      onResetDemoData();
-                    }}
-                    className="flex items-center gap-2.5 px-3 py-2 rounded-xl text-primary hover:bg-primary-tint transition-colors text-left font-semibold"
-                  >
-                    <ArrowCounterClockwise size={16} />
-                    <span>Reset Data Demo</span>
-                  </button>
-                )}
-
                 <div className="my-1 border-t border-border-subtle/60" />
 
                 <button
                   type="button"
-                  className="flex items-center gap-2.5 px-3 py-2 rounded-xl text-semantic-urgent hover:bg-semantic-urgent-tint transition-colors text-left font-medium"
+                  disabled={isSigningOut}
+                  onClick={handleSignOut}
+                  className="flex items-center gap-2.5 px-3 py-2 rounded-xl text-semantic-urgent hover:bg-semantic-urgent-tint transition-colors text-left font-medium disabled:opacity-50 cursor-pointer"
                 >
                   <SignOut size={16} />
-                  <span>Keluar</span>
+                  <span>{isSigningOut ? 'Keluar...' : 'Keluar'}</span>
                 </button>
               </div>
             </div>

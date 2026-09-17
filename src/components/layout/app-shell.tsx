@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState } from 'react';
+import { usePathname } from 'next/navigation';
 import { Sidebar } from './sidebar';
 import { Topbar } from './topbar';
 import { BottomNav } from './bottom-nav';
@@ -8,15 +9,27 @@ import { useApp } from '@/context/app-context';
 import { cn } from '@/lib/utils';
 
 export const AppShell: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+  const pathname = usePathname();
   const { 
     isSidebarCollapsed, 
     toggleSidebar, 
     searchQuery, 
-    setSearchQuery, 
-    resetDemoData 
+    setSearchQuery 
   } = useApp();
 
   const [isMobileOpen, setIsMobileOpen] = useState(false);
+
+  // If on auth pages, render pure children without Sidebar/Topbar/BottomNav
+  const isAuthPage = 
+    pathname.startsWith('/login') || 
+    pathname.startsWith('/register') || 
+    pathname.startsWith('/forgot-password') || 
+    pathname.startsWith('/reset-password') ||
+    pathname.startsWith('/auth');
+
+  if (isAuthPage) {
+    return <>{children}</>;
+  }
 
   return (
     <div className="min-h-screen flex bg-page-background text-text-primary antialiased font-sans">
@@ -46,7 +59,6 @@ export const AppShell: React.FC<{ children: React.ReactNode }> = ({ children }) 
           }}
           searchQuery={searchQuery}
           onSearchChange={setSearchQuery}
-          onResetDemoData={resetDemoData}
         />
 
         {/* Page Content */}
