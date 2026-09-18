@@ -2,7 +2,7 @@
 
 import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
 import { User } from '@supabase/supabase-js';
-import { UnifiedTask, Course, Competition, Committee, TaskStatus, UserProfile, Semester } from '@/types';
+import { UnifiedTask, Course, Competition, Committee, CommitteeMeeting, TaskStatus, UserProfile, Semester } from '@/types';
 import { createClient } from '@/lib/supabase/client';
 
 interface AppContextType {
@@ -17,6 +17,7 @@ interface AppContextType {
   courses: Course[];
   competitions: Competition[];
   committees: Committee[];
+  meetings: CommitteeMeeting[];
   semesters: Semester[];
   activeSemesterId: string | null;
   setActiveSemesterId: (id: string) => void;
@@ -36,7 +37,14 @@ interface AppContextType {
   updateCourse: (courseId: string, course: Partial<Course>) => void;
   deleteCourse: (courseId: string) => void;
   addCompetition: (comp: Omit<Competition, 'id'>) => void;
+  updateCompetition: (id: string, comp: Partial<Competition>) => void;
+  deleteCompetition: (id: string) => void;
   addCommittee: (committee: Omit<Committee, 'id'>) => void;
+  updateCommittee: (id: string, comm: Partial<Committee>) => void;
+  deleteCommittee: (id: string) => void;
+  addMeeting: (meeting: Omit<CommitteeMeeting, 'id'>) => void;
+  updateMeeting: (id: string, meeting: Partial<CommitteeMeeting>) => void;
+  deleteMeeting: (id: string) => void;
   stats: {
     total: number;
     notStarted: number;
@@ -69,6 +77,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [courses, setCourses] = useState<Course[]>([]);
   const [competitions, setCompetitions] = useState<Competition[]>([]);
   const [committees, setCommittees] = useState<Committee[]>([]);
+  const [meetings, setMeetings] = useState<CommitteeMeeting[]>([]);
   const [semesters, setSemesters] = useState<Semester[]>(defaultSemesters);
   const [activeSemesterId, setActiveSemesterId] = useState<string | null>('sem-ganjil-2026');
   const [searchQuery, setSearchQuery] = useState('');
@@ -120,6 +129,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         setCourses(parsed.courses || []);
         setCompetitions(parsed.competitions || []);
         setCommittees(parsed.committees || []);
+        setMeetings(parsed.meetings || []);
         const loadedSemesters: Semester[] = parsed.semesters && parsed.semesters.length > 0
           ? parsed.semesters
           : [{ id: 'sem-ganjil-2026', name: 'Ganjil 2026/2027', is_active: true }];
@@ -130,6 +140,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         setCourses([]);
         setCompetitions([]);
         setCommittees([]);
+        setMeetings([]);
         setSemesters([{ id: 'sem-ganjil-2026', name: 'Ganjil 2026/2027', is_active: true }]);
         setActiveSemesterId('sem-ganjil-2026');
       }
@@ -181,6 +192,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         setCourses([]);
         setCompetitions([]);
         setCommittees([]);
+        setMeetings([]);
         setIsDataLoaded(true);
       }
       setIsLoadingAuth(false);
@@ -205,12 +217,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     if (!user || !isDataLoaded) return;
     try {
       const userKey = `ONWARD_DATA_${user.id}`;
-      const payload = { tasks, courses, competitions, committees, semesters, activeSemesterId };
+      const payload = { tasks, courses, competitions, committees, meetings, semesters, activeSemesterId };
       localStorage.setItem(userKey, JSON.stringify(payload));
     } catch (e) {
       console.error('Error saving user data:', e);
     }
-  }, [tasks, courses, competitions, committees, semesters, activeSemesterId, user, isDataLoaded]);
+  }, [tasks, courses, competitions, committees, meetings, semesters, activeSemesterId, user, isDataLoaded]);
 
   // Keyboard shortcut Ctrl + B to toggle sidebar
   useEffect(() => {
@@ -319,12 +331,63 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setCompetitions((prev) => [newComp, ...prev]);
   };
 
+  const updateCompetition = (id: string, compData: Partial<Competition>) => {
+    setCompetitions((prev) =>
+      prev.map((c) => (c.id === id ? { ...c, ...compData } : c))
+    );
+    if (compData.name) {
+      setTasks((prev) =>
+        prev.map((t) => (t.parent_id === id ? { ...t, parent_title: compData.name! } : t))
+      );
+    }
+  };
+
+  const deleteCompetition = (id: string) => {
+    setCompetitions((prev) => prev.filter((c) => c.id !== id));
+    setTasks((prev) => prev.filter((t) => t.parent_id !== id));
+  };
+
   const addCommittee = (commData: Omit<Committee, 'id'>) => {
     const newComm: Committee = {
       ...commData,
       id: `org-${Date.now()}`,
     };
     setCommittees((prev) => [newComm, ...prev]);
+  };
+
+  const updateCommittee = (id: string, commData: Partial<Committee>) => {
+    setCommittees((prev) =>
+      prev.map((c) => (c.id === id ? { ...c, ...commData } : c))
+    );
+    if (commData.organization_event_name) {
+      setTasks((prev) =>
+        prev.map((t) => (t.parent_id === id ? { ...t, parent_title: commData.organization_event_name! } : t))
+      );
+    }
+  };
+
+  const deleteCommittee = (id: string) => {
+    setCommittees((prev) => prev.filter((c) => c.id !== id));
+    setTasks((prev) => prev.filter((t) => t.parent_id !== id));
+    setMeetings((prev) => prev.filter((m) => m.committee_id !== id));
+  };
+
+  const addMeeting = (meetingData: Omit<CommitteeMeeting, 'id'>) => {
+    const newMeeting: CommitteeMeeting = {
+      ...meetingData,
+      id: `meet-${Date.now()}`,
+    };
+    setMeetings((prev) => [...prev, newMeeting]);
+  };
+
+  const updateMeeting = (id: string, meetingData: Partial<CommitteeMeeting>) => {
+    setMeetings((prev) =>
+      prev.map((m) => (m.id === id ? { ...m, ...meetingData } : m))
+    );
+  };
+
+  const deleteMeeting = (id: string) => {
+    setMeetings((prev) => prev.filter((m) => m.id !== id));
   };
 
   const signOut = async () => {
@@ -336,6 +399,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       setCourses([]);
       setCompetitions([]);
       setCommittees([]);
+      setMeetings([]);
       window.location.href = '/login';
     } catch (e) {
       console.error('SignOut error:', e);
@@ -398,6 +462,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         courses,
         competitions,
         committees,
+        meetings,
         semesters,
         activeSemesterId,
         setActiveSemesterId,
@@ -416,7 +481,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         updateCourse,
         deleteCourse,
         addCompetition,
+        updateCompetition,
+        deleteCompetition,
         addCommittee,
+        updateCommittee,
+        deleteCommittee,
+        addMeeting,
+        updateMeeting,
+        deleteMeeting,
         updateProfile,
         stats: { total, notStarted, inProgress, completed, completionPercentage },
       }}

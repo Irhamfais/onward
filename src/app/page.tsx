@@ -1,6 +1,7 @@
 'use client';
 
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
+import Link from 'next/link';
 import { useApp } from '@/context/app-context';
 import { TaskCategory, TaskStatus } from '@/types';
 import { 
@@ -17,20 +18,26 @@ import {
   Trash,
   Check,
   X,
-  Alarm
+  Alarm,
+  MapPin,
+  VideoCamera
 } from '@phosphor-icons/react';
 import { cn } from '@/lib/utils';
+import { formatDateDisplay } from '@/lib/date-utils';
 
 export default function DashboardPage() {
   const { 
+    user,
+    profile,
     tasks, 
     courses, 
-    competitions,
-    committees,
+    competitions, 
+    committees, 
     searchQuery, 
     cycleTaskStatus, 
     deleteTask, 
     addTask, 
+    addMeeting,
     stats 
   } = useApp();
 
@@ -42,30 +49,51 @@ export default function DashboardPage() {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [newTitle, setNewTitle] = useState('');
   const [newCategory, setNewCategory] = useState<TaskCategory>('KULIAH');
-  const [newParentTitle, setNewParentTitle] = useState('');
+  const [selectedParentId, setSelectedParentId] = useState<string>('');
+  const [customParentTitle, setCustomParentTitle] = useState('');
+  const [committeeActivityType, setCommitteeActivityType] = useState<'JOB_DESC' | 'RAPAT'>('JOB_DESC');
   const [newDate, setNewDate] = useState('2026-09-20');
   const [newTime, setNewTime] = useState('23:59');
   const [newStatus, setNewStatus] = useState<TaskStatus>('BELUM_MULAI');
+  const [meetingLocation, setMeetingLocation] = useState('via Zoom Meeting');
+  const [isRecurringMeeting, setIsRecurringMeeting] = useState(false);
+  const [taskNotes, setTaskNotes] = useState('');
   const [remindEmail, setRemindEmail] = useState(true);
   const [remindWA, setRemindWA] = useState(true);
 
-  // Dynamic Parent Options based on Category
-  const parentOptions = useMemo(() => {
+  // Dynamic Parent Items with ID & Title based on Category
+  const parentItems = useMemo(() => {
     if (newCategory === 'KULIAH') {
-      return courses.map((c) => c.course_name);
+      return courses.map((c) => ({
+        id: c.id,
+        title: c.course_name,
+        subtitle: `${c.credits_sks || 3} SKS`,
+      }));
     } else if (newCategory === 'LOMBA') {
-      return competitions.map((c) => c.name);
+      return competitions.map((c) => ({
+        id: c.id,
+        title: c.name,
+        subtitle: c.category || 'Kompetisi',
+      }));
     } else {
-      return committees.map((c) => c.organization_event_name);
+      return committees.map((c) => ({
+        id: c.id,
+        title: c.organization_event_name,
+        subtitle: c.role_division,
+      }));
     }
   }, [newCategory, courses, competitions, committees]);
 
-  // Set default parent title when category changes
-  React.useEffect(() => {
-    if (parentOptions.length > 0 && !parentOptions.includes(newParentTitle)) {
-      setNewParentTitle(parentOptions[0]);
+  // Set default parent item when category changes
+  useEffect(() => {
+    if (parentItems.length > 0) {
+      if (!parentItems.some((p) => p.id === selectedParentId)) {
+        setSelectedParentId(parentItems[0].id);
+      }
+    } else {
+      setSelectedParentId('');
     }
-  }, [newCategory, parentOptions, newParentTitle]);
+  }, [newCategory, parentItems, selectedParentId]);
 
   // Filter and sort tasks (Strictly by deadline ASC)
   const filteredTasks = useMemo(() => {
@@ -88,6 +116,48 @@ export default function DashboardPage() {
       .filter((t) => t.status !== 'SELESAI')
       .sort((a, b) => new Date(a.deadline).getTime() - new Date(b.deadline).getTime())
       .slice(0, 3);
+  }, [tasks]);
+
+  // User Display Name
+  const displayName = useMemo(() => {
+    return (
+      profile?.name?.trim() ||
+      (user?.user_metadata?.full_name as string)?.trim() ||
+      (user?.user_metadata?.name as string)?.trim() ||
+      (user?.email ? user.email.split('@')[0] : '') ||
+      'Mahasiswa'
+    );
+  }, [profile?.name, user?.user_metadata, user?.email]);
+
+  // Check if first-time login or returning user
+  const [isReturningUser, setIsReturningUser] = useState<boolean>(true);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const storageKey = user?.id ? `ONWARD_RETURNING_${user.id}` : 'ONWARD_RETURNING_GUEST';
+    const visited = localStorage.getItem(storageKey);
+    const hasData = tasks.length > 0 || courses.length > 0 || competitions.length > 0 || committees.length > 0;
+
+    if (visited === 'true' || hasData) {
+      setIsReturningUser(true);
+    } else {
+      setIsReturningUser(false);
+      localStorage.setItem(storageKey, 'true');
+    }
+  }, [user?.id, tasks.length, courses.length, competitions.length, committees.length]);
+
+  // Tasks due this week (within next 7 days or overdue, incomplete)
+  const dueThisWeekCount = useMemo(() => {
+    const now = new Date();
+    const sevenDaysLater = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 7, 23, 59, 59, 999).getTime();
+
+    return tasks.filter((t) => {
+      if (t.status === 'SELESAI') return false;
+      if (!t.deadline) return false;
+      const deadlineTime = new Date(t.deadline).getTime();
+      if (isNaN(deadlineTime)) return false;
+      return deadlineTime <= sevenDaysLater;
+    }).length;
   }, [tasks]);
 
   // Task distribution for Donut Chart
@@ -114,22 +184,58 @@ export default function DashboardPage() {
     e.preventDefault();
     if (!newTitle.trim()) return;
 
-    const fullDeadline = `${newDate}T${newTime}:00`;
-    const d = new Date(fullDeadline);
-    const months = ['Jan', 'Feb', 'Mar', 'Apr', 'Mei', 'Jun', 'Jul', 'Agu', 'Sep', 'Okt', 'Nov', 'Des'];
-    const deadlineDisplay = `${d.getDate()} ${months[d.getMonth()]}`;
+    const selectedParent = parentItems.find((p) => p.id === selectedParentId) || (parentItems.length > 0 ? parentItems[0] : null);
+    const parentId = selectedParent ? selectedParent.id : undefined;
+    const parentTitle = selectedParent
+      ? selectedParent.title
+      : customParentTitle.trim() ||
+        (newCategory === 'KULIAH' ? 'Kuliah Umum' : newCategory === 'LOMBA' ? 'Kompetisi Umum' : 'Kepanitiaan Umum');
 
-    addTask({
-      title: newTitle.trim(),
-      category: newCategory,
-      parent_title: newParentTitle || (newCategory === 'KULIAH' ? 'Kuliah Umum' : 'Projek'),
-      deadline: fullDeadline,
-      deadlineDisplay,
-      status: newStatus,
-    });
+    const fullDeadline = `${newDate}T${newTime || '23:59'}:00`;
+    const deadlineDisplay = formatDateDisplay(fullDeadline);
+
+    if (newCategory === 'KEPANITIAAN' && committeeActivityType === 'RAPAT') {
+      // 1. Save directly to Committee Meeting schedule
+      if (parentId) {
+        addMeeting({
+          committee_id: parentId,
+          title: newTitle.trim(),
+          meeting_date: newDate,
+          start_time: newTime || '16:00',
+          location: meetingLocation.trim() || 'via Zoom Meeting',
+          is_recurring: isRecurringMeeting,
+        });
+      }
+
+      // 2. Also register in Unified Tasks for Dashboard upcoming deadline agenda
+      addTask({
+        title: `Rapat: ${newTitle.trim()}`,
+        category: 'KEPANITIAAN',
+        parent_title: parentTitle,
+        parent_id: parentId,
+        deadline: fullDeadline,
+        deadlineDisplay,
+        status: newStatus,
+        notes: `Lokasi: ${meetingLocation.trim() || 'via Zoom'}${isRecurringMeeting ? ' • Berulang rutin' : ''}${taskNotes.trim() ? ` • ${taskNotes.trim()}` : ''}`,
+      });
+    } else {
+      // Regular Course Task, Competition Milestone, or Committee Job Desc
+      addTask({
+        title: newTitle.trim(),
+        category: newCategory,
+        parent_title: parentTitle,
+        parent_id: parentId,
+        deadline: fullDeadline,
+        deadlineDisplay,
+        status: newStatus,
+        notes: taskNotes.trim() || undefined,
+      });
+    }
 
     // Reset form
     setNewTitle('');
+    setTaskNotes('');
+    setCustomParentTitle('');
     setIsModalOpen(false);
   };
 
@@ -140,10 +246,14 @@ export default function DashboardPage() {
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
           <h1 className="font-display text-2xl md:text-3xl font-bold text-text-primary tracking-tight">
-            Selamat pagi, Alya 👋
+            {isReturningUser 
+              ? `Halo, selamat datang kembali, ${displayName} 👋` 
+              : `Halo, selamat datang di Onward, ${displayName} 👋`}
           </h1>
           <p className="text-sm text-text-secondary mt-1">
-            Ada 3 tugas yang jatuh tempo minggu ini.
+            {dueThisWeekCount > 0 
+              ? `Ada ${dueThisWeekCount} tugas yang jatuh tempo minggu ini.` 
+              : 'Belum ada tugas yang hampir mendekati deadline!'}
           </p>
         </div>
 
@@ -331,9 +441,13 @@ export default function DashboardPage() {
                         >
                           {t.title}
                         </span>
-                        <span className="text-xs text-text-secondary truncate mt-0.5">
+                        <Link
+                          href={t.category === 'KULIAH' ? '/kuliah' : t.category === 'LOMBA' ? '/lomba' : '/kepanitiaan'}
+                          className="text-xs text-text-secondary hover:text-primary transition-colors truncate mt-0.5 inline-block hover:underline"
+                          title={`Buka modul ${t.category.toLowerCase()}`}
+                        >
                           {t.parent_title}
-                        </span>
+                        </Link>
                       </div>
                     </div>
 
@@ -704,108 +818,218 @@ export default function DashboardPage() {
 
       </div>
 
-      {/* ==================== MODAL TAMBAH TUGAS ==================== */}
+      {/* ==================== MODAL TAMBAH TUGAS / AKTIVITAS ==================== */}
       {isModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-[#1F1B2E]/45 backdrop-blur-xs animate-in fade-in duration-150">
-          <div className="w-full max-w-[480px] bg-surface-card rounded-2xl border border-border-subtle shadow-modal flex flex-col overflow-hidden animate-in zoom-in-95 duration-150">
+          <div className="w-full max-w-[500px] bg-surface-card rounded-2xl border border-border-subtle shadow-modal flex flex-col overflow-hidden animate-in zoom-in-95 duration-150">
             {/* Header */}
             <div className="px-6 py-4 border-b border-border-subtle flex items-center justify-between bg-surface-card">
-              <h2 className="font-display text-lg font-bold text-text-primary">Tambah Tugas Baru</h2>
+              <div className="flex items-center gap-2.5">
+                <div className={cn(
+                  'w-8 h-8 rounded-xl flex items-center justify-center',
+                  newCategory === 'KULIAH' ? 'bg-category-kuliah-tint text-category-kuliah' :
+                  newCategory === 'LOMBA' ? 'bg-category-lomba-tint text-[#B45309]' :
+                  'bg-category-kepanitiaan-tint text-category-kepanitiaan'
+                )}>
+                  {newCategory === 'KULIAH' && <BookOpen size={18} weight="bold" />}
+                  {newCategory === 'LOMBA' && <Trophy size={18} weight="bold" />}
+                  {newCategory === 'KEPANITIAAN' && (
+                    committeeActivityType === 'RAPAT' ? <VideoCamera size={18} weight="bold" /> : <Users size={18} weight="bold" />
+                  )}
+                </div>
+                <div>
+                  <h2 className="font-display text-base font-bold text-text-primary">
+                    {newCategory === 'KULIAH' && 'Tambah Tugas Kuliah'}
+                    {newCategory === 'LOMBA' && 'Tambah Milestone Lomba'}
+                    {newCategory === 'KEPANITIAAN' && (
+                      committeeActivityType === 'RAPAT' ? 'Jadwalkan Rapat Kepanitiaan' : 'Tambah Job Desc Divisi'
+                    )}
+                  </h2>
+                  <p className="text-[11px] text-text-secondary">
+                    Terintegrasi langsung dengan modul {newCategory.toLowerCase()} dan kalender agenda
+                  </p>
+                </div>
+              </div>
               <button
                 type="button"
                 onClick={() => setIsModalOpen(false)}
-                className="w-8 h-8 rounded-lg flex items-center justify-center text-text-secondary hover:bg-status-not-started-tint hover:text-text-primary transition-colors"
+                className="w-8 h-8 rounded-lg flex items-center justify-center text-text-secondary hover:bg-status-not-started-tint hover:text-text-primary transition-colors cursor-pointer"
               >
                 <X size={18} />
               </button>
             </div>
 
             {/* Form */}
-            <form onSubmit={handleCreateTask} className="p-6 flex flex-col gap-4">
-              {/* Category */}
+            <form onSubmit={handleCreateTask} className="p-6 flex flex-col gap-4 max-h-[82vh] overflow-y-auto">
+              {/* Category Selector */}
               <div className="flex flex-col gap-1.5">
-                <label className="text-xs font-semibold text-text-primary">Kategori Tugas</label>
+                <label className="text-xs font-semibold text-text-primary">Kategori Aktivitas</label>
                 <div className="grid grid-cols-3 gap-2.5">
                   <button
                     type="button"
                     onClick={() => setNewCategory('KULIAH')}
                     className={cn(
-                      'py-2 px-3 rounded-xl border-2 font-semibold text-xs flex items-center justify-center gap-1.5 transition-all',
+                      'py-2 px-3 rounded-xl border-2 font-semibold text-xs flex items-center justify-center gap-1.5 transition-all cursor-pointer',
                       newCategory === 'KULIAH'
                         ? 'border-category-kuliah bg-category-kuliah-tint text-category-kuliah'
                         : 'border-border-subtle text-text-secondary hover:border-category-kuliah'
                     )}
                   >
-                    <BookOpen size={14} />
+                    <BookOpen size={15} weight="bold" />
                     <span>Kuliah</span>
                   </button>
                   <button
                     type="button"
                     onClick={() => setNewCategory('LOMBA')}
                     className={cn(
-                      'py-2 px-3 rounded-xl border-2 font-semibold text-xs flex items-center justify-center gap-1.5 transition-all',
+                      'py-2 px-3 rounded-xl border-2 font-semibold text-xs flex items-center justify-center gap-1.5 transition-all cursor-pointer',
                       newCategory === 'LOMBA'
-                        ? 'border-category-lomba bg-category-lomba-tint text-category-lomba'
+                        ? 'border-category-lomba bg-category-lomba-tint text-[#B45309]'
                         : 'border-border-subtle text-text-secondary hover:border-category-lomba'
                     )}
                   >
-                    <Trophy size={14} />
+                    <Trophy size={15} weight="bold" />
                     <span>Lomba</span>
                   </button>
                   <button
                     type="button"
                     onClick={() => setNewCategory('KEPANITIAAN')}
                     className={cn(
-                      'py-2 px-3 rounded-xl border-2 font-semibold text-xs flex items-center justify-center gap-1.5 transition-all',
+                      'py-2 px-3 rounded-xl border-2 font-semibold text-xs flex items-center justify-center gap-1.5 transition-all cursor-pointer',
                       newCategory === 'KEPANITIAAN'
                         ? 'border-category-kepanitiaan bg-category-kepanitiaan-tint text-category-kepanitiaan'
                         : 'border-border-subtle text-text-secondary hover:border-category-kepanitiaan'
                     )}
                   >
-                    <Users size={14} />
-                    <span>Panitia</span>
+                    <Users size={15} weight="bold" />
+                    <span>Kepanitiaan</span>
                   </button>
                 </div>
               </div>
 
-              {/* Terkait dengan */}
+              {/* Khusus Kepanitiaan: Opsi Jenis Aktivitas (Job Desc vs Rapat) */}
+              {newCategory === 'KEPANITIAAN' && (
+                <div className="flex flex-col gap-1.5 p-3 rounded-xl bg-category-kepanitiaan-tint/40 border border-category-kepanitiaan/30">
+                  <label className="text-xs font-semibold text-category-kepanitiaan">
+                    Jenis Aktivitas Kepanitiaan:
+                  </label>
+                  <div className="grid grid-cols-2 gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setCommitteeActivityType('JOB_DESC')}
+                      className={cn(
+                        'py-1.5 px-2.5 rounded-lg text-xs font-semibold flex items-center justify-center gap-1.5 transition-all cursor-pointer',
+                        committeeActivityType === 'JOB_DESC'
+                          ? 'bg-category-kepanitiaan text-white shadow-xs'
+                          : 'bg-white text-text-secondary border border-border-subtle hover:text-text-primary'
+                      )}
+                    >
+                      <ClipboardText size={14} weight="bold" />
+                      <span>Job Desc / Tugas</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setCommitteeActivityType('RAPAT')}
+                      className={cn(
+                        'py-1.5 px-2.5 rounded-lg text-xs font-semibold flex items-center justify-center gap-1.5 transition-all cursor-pointer',
+                        committeeActivityType === 'RAPAT'
+                          ? 'bg-category-kepanitiaan text-white shadow-xs'
+                          : 'bg-white text-text-secondary border border-border-subtle hover:text-text-primary'
+                      )}
+                    >
+                      <VideoCamera size={14} weight="bold" />
+                      <span>Jadwal Rapat</span>
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {/* Induk Terkait (Mata Kuliah / Kompetisi / Kepanitiaan) */}
               <div className="flex flex-col gap-1.5">
                 <label className="text-xs font-semibold text-text-primary">
                   {newCategory === 'KULIAH'
                     ? 'Mata Kuliah Terkait'
                     : newCategory === 'LOMBA'
                     ? 'Kompetisi Terkait'
-                    : 'Kepanitiaan Terkait'}
+                    : 'Kepanitiaan / Organisasi Terkait'}
+                  <span className="text-semantic-urgent ml-0.5">*</span>
                 </label>
-                <select
-                  value={newParentTitle}
-                  onChange={(e) => setNewParentTitle(e.target.value)}
-                  className="w-full h-10 px-3.5 bg-surface-card border border-border-subtle rounded-xl text-xs text-text-primary focus:outline-none focus:border-primary transition-all cursor-pointer"
-                >
-                  {parentOptions.map((opt) => (
-                    <option key={opt} value={opt}>
-                      {opt}
-                    </option>
-                  ))}
-                </select>
+
+                {parentItems.length > 0 ? (
+                  <select
+                    value={selectedParentId}
+                    onChange={(e) => setSelectedParentId(e.target.value)}
+                    className="w-full h-10 px-3.5 bg-surface-card border border-border-subtle rounded-xl text-xs text-text-primary focus:outline-none focus:border-primary transition-all cursor-pointer"
+                  >
+                    {parentItems.map((item) => (
+                      <option key={item.id} value={item.id}>
+                        {item.title} ({item.subtitle})
+                      </option>
+                    ))}
+                  </select>
+                ) : (
+                  <div className="flex flex-col gap-2">
+                    <div className="p-3 bg-[#FFF8EB] border border-[#FDE68A] text-[#92400E] rounded-xl text-xs flex items-center justify-between">
+                      <span>
+                        Belum ada {newCategory === 'KULIAH' ? 'mata kuliah' : newCategory === 'LOMBA' ? 'lomba' : 'kepanitiaan'} terdaftar.
+                      </span>
+                      <Link
+                        href={newCategory === 'KULIAH' ? '/kuliah' : newCategory === 'LOMBA' ? '/lomba' : '/kepanitiaan'}
+                        className="font-bold underline ml-2 shrink-0 text-primary"
+                      >
+                        Buka Modul
+                      </Link>
+                    </div>
+                    <input
+                      type="text"
+                      value={customParentTitle}
+                      onChange={(e) => setCustomParentTitle(e.target.value)}
+                      placeholder={`Atau ketik nama ${newCategory === 'KULIAH' ? 'mata kuliah' : newCategory === 'LOMBA' ? 'kompetisi' : 'kepanitiaan'}...`}
+                      className="w-full h-10 px-3.5 bg-surface-card border border-border-subtle rounded-xl text-xs text-text-primary focus:outline-none focus:border-primary transition-all"
+                    />
+                  </div>
+                )}
               </div>
 
-              {/* Task Name */}
+              {/* Title Input: Adapts Label based on category & activity type */}
               <div className="flex flex-col gap-1.5">
-                <label className="text-xs font-semibold text-text-primary">Nama Tugas / Aktivitas</label>
+                <label className="text-xs font-semibold text-text-primary">
+                  {newCategory === 'KULIAH' && 'Nama Tugas Kuliah'}
+                  {newCategory === 'LOMBA' && 'Nama Milestone / Sub-tugas Lomba'}
+                  {newCategory === 'KEPANITIAAN' && (
+                    committeeActivityType === 'RAPAT' ? 'Agenda / Judul Rapat' : 'Nama Job Desc / Tugas Divisi'
+                  )}
+                  <span className="text-semantic-urgent ml-0.5">*</span>
+                </label>
                 <input
                   type="text"
                   required
                   value={newTitle}
                   onChange={(e) => setNewTitle(e.target.value)}
-                  placeholder="Misal: Kumpulkan Laporan Praktikum..."
+                  placeholder={
+                    newCategory === 'KULIAH'
+                      ? 'Misal: Makalah Etika AI, Tugas Praktikum 3...'
+                      : newCategory === 'LOMBA'
+                      ? 'Misal: Pitch Deck, Video Demo, Prototype Figma...'
+                      : committeeActivityType === 'RAPAT'
+                      ? 'Misal: Rapat Koordinasi Rundown, Evaluasi Mingguan...'
+                      : 'Misal: Pembuatan Rundown, Desain Poster, Kontak Guest Star...'
+                  }
                   className="w-full h-10 px-3.5 bg-surface-card border border-border-subtle rounded-xl text-xs text-text-primary focus:outline-none focus:border-primary transition-all"
                 />
               </div>
 
-              {/* Deadline */}
+              {/* Date & Time */}
               <div className="flex flex-col gap-1.5">
-                <label className="text-xs font-semibold text-text-primary">Tenggat Waktu (Deadline)</label>
+                <label className="text-xs font-semibold text-text-primary flex items-center gap-1.5">
+                  <CalendarBlank size={14} className="text-text-secondary" />
+                  <span>
+                    {newCategory === 'KEPANITIAAN' && committeeActivityType === 'RAPAT'
+                      ? 'Tanggal & Jam Mulai Rapat'
+                      : 'Tenggat Waktu (Deadline)'}
+                  </span>
+                  <span className="text-semantic-urgent">*</span>
+                </label>
                 <div className="grid grid-cols-2 gap-3">
                   <input
                     type="date"
@@ -824,50 +1048,112 @@ export default function DashboardPage() {
                 </div>
               </div>
 
-              {/* Status Awal */}
-              <div className="flex flex-col gap-1.5">
-                <label className="text-xs font-semibold text-text-primary">Status Awal</label>
-                <div className="grid grid-cols-3 gap-2">
-                  <button
-                    type="button"
-                    onClick={() => setNewStatus('BELUM_MULAI')}
-                    className={cn(
-                      'py-1.5 rounded-full border-[1.5px] text-[11px] font-semibold flex items-center justify-center gap-1.5 transition-all',
-                      newStatus === 'BELUM_MULAI'
-                        ? 'border-status-not-started bg-status-not-started-tint text-text-primary'
-                        : 'border-border-subtle bg-surface-card text-text-secondary'
-                    )}
-                  >
-                    <span className="w-2 h-2 rounded-full bg-status-not-started" />
-                    <span>Belum Mulai</span>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setNewStatus('SEDANG_DIKERJAKAN')}
-                    className={cn(
-                      'py-1.5 rounded-full border-[1.5px] text-[11px] font-semibold flex items-center justify-center gap-1.5 transition-all',
-                      newStatus === 'SEDANG_DIKERJAKAN'
-                        ? 'border-status-in-progress bg-status-in-progress-tint text-status-in-progress'
-                        : 'border-border-subtle bg-surface-card text-text-secondary'
-                    )}
-                  >
-                    <span className="w-2 h-2 rounded-full bg-status-in-progress" />
-                    <span>Sedang Kerja</span>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setNewStatus('SELESAI')}
-                    className={cn(
-                      'py-1.5 rounded-full border-[1.5px] text-[11px] font-semibold flex items-center justify-center gap-1.5 transition-all',
-                      newStatus === 'SELESAI'
-                        ? 'border-status-completed bg-status-completed-tint text-status-completed'
-                        : 'border-border-subtle bg-surface-card text-text-secondary'
-                    )}
-                  >
-                    <span className="w-2 h-2 rounded-full bg-status-completed" />
-                    <span>Selesai</span>
-                  </button>
+              {/* Khusus Rapat: Lokasi & Opsi Berulang */}
+              {newCategory === 'KEPANITIAAN' && committeeActivityType === 'RAPAT' ? (
+                <>
+                  <div className="flex flex-col gap-1.5">
+                    <label className="text-xs font-semibold text-text-primary flex items-center gap-1.5">
+                      <MapPin size={14} className="text-text-secondary" />
+                      <span>Lokasi / Platform Pertemuan</span>
+                      <span className="text-semantic-urgent">*</span>
+                    </label>
+                    <input
+                      type="text"
+                      required
+                      value={meetingLocation}
+                      onChange={(e) => setMeetingLocation(e.target.value)}
+                      placeholder="Misal: via Zoom Meeting, Sekretariat BEM, Selasar..."
+                      className="w-full h-10 px-3.5 bg-surface-card border border-border-subtle rounded-xl text-xs text-text-primary focus:outline-none focus:border-primary transition-all"
+                    />
+                  </div>
+
+                  <div className="flex items-center gap-2 pt-0.5">
+                    <input
+                      type="checkbox"
+                      id="dashboard-meeting-recurring"
+                      checked={isRecurringMeeting}
+                      onChange={(e) => setIsRecurringMeeting(e.target.checked)}
+                      className="rounded text-primary focus:ring-primary cursor-pointer"
+                    />
+                    <label
+                      htmlFor="dashboard-meeting-recurring"
+                      className="text-xs text-text-primary font-medium cursor-pointer select-none flex items-center gap-1.5"
+                    >
+                      <ArrowsClockwise size={14} className="text-category-kepanitiaan" />
+                      <span>Tandai sebagai rapat rutin berulang (Mingguan / Dwimingguan)</span>
+                    </label>
+                  </div>
+                </>
+              ) : (
+                /* Status Awal Pengerjaan untuk tugas / milestone / job desc */
+                <div className="flex flex-col gap-1.5">
+                  <label className="text-xs font-semibold text-text-primary">Status Awal</label>
+                  <div className="grid grid-cols-3 gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setNewStatus('BELUM_MULAI')}
+                      className={cn(
+                        'py-1.5 rounded-xl border text-[11px] font-semibold flex items-center justify-center gap-1.5 transition-all cursor-pointer',
+                        newStatus === 'BELUM_MULAI'
+                          ? 'border-status-not-started bg-status-not-started-tint text-text-primary ring-1 ring-status-not-started'
+                          : 'border-border-subtle bg-surface-card text-text-secondary'
+                      )}
+                    >
+                      <span className="w-2 h-2 rounded-full bg-status-not-started" />
+                      <span>Belum Mulai</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setNewStatus('SEDANG_DIKERJAKAN')}
+                      className={cn(
+                        'py-1.5 rounded-xl border text-[11px] font-semibold flex items-center justify-center gap-1.5 transition-all cursor-pointer',
+                        newStatus === 'SEDANG_DIKERJAKAN'
+                          ? 'border-status-in-progress bg-status-in-progress-tint text-status-in-progress ring-1 ring-status-in-progress'
+                          : 'border-border-subtle bg-surface-card text-text-secondary'
+                      )}
+                    >
+                      <span className="w-2 h-2 rounded-full bg-status-in-progress" />
+                      <span>Dikerjakan</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setNewStatus('SELESAI')}
+                      className={cn(
+                        'py-1.5 rounded-xl border text-[11px] font-semibold flex items-center justify-center gap-1.5 transition-all cursor-pointer',
+                        newStatus === 'SELESAI'
+                          ? 'border-status-completed bg-status-completed-tint text-status-completed ring-1 ring-status-completed'
+                          : 'border-border-subtle bg-surface-card text-text-secondary'
+                      )}
+                    >
+                      <span className="w-2 h-2 rounded-full bg-status-completed" />
+                      <span>Selesai</span>
+                    </button>
+                  </div>
                 </div>
+              )}
+
+              {/* Catatan / Keterangan Tambahan */}
+              <div className="flex flex-col gap-1.5">
+                <label className="text-xs font-semibold text-text-primary">
+                  {newCategory === 'LOMBA'
+                    ? 'Catatan Milestone / Link Pengerjaan'
+                    : newCategory === 'KEPANITIAAN'
+                    ? 'Catatan / Detail PIC'
+                    : 'Catatan Tugas'}
+                </label>
+                <textarea
+                  rows={2}
+                  value={taskNotes}
+                  onChange={(e) => setTaskNotes(e.target.value)}
+                  placeholder={
+                    newCategory === 'LOMBA'
+                      ? 'Misal: Link Figma, Google Drive submisi...'
+                      : newCategory === 'KEPANITIAAN'
+                      ? 'Misal: PIC: Budi, butuh koordinasi dengan Sie Acara...'
+                      : 'Misal: Format PDF, sertakan lampiran jurnal...'
+                  }
+                  className="w-full px-3.5 py-2 bg-surface-card border border-border-subtle rounded-xl text-xs text-text-primary focus:outline-none focus:border-primary transition-all resize-none"
+                />
               </div>
 
               {/* Reminders */}
@@ -900,15 +1186,22 @@ export default function DashboardPage() {
                 <button
                   type="button"
                   onClick={() => setIsModalOpen(false)}
-                  className="px-4 py-2 rounded-xl text-xs font-semibold text-text-secondary hover:bg-page-background transition-colors"
+                  className="px-4 py-2 rounded-xl text-xs font-semibold text-text-secondary hover:bg-page-background transition-colors cursor-pointer"
                 >
                   Batal
                 </button>
                 <button
                   type="submit"
-                  className="px-5 py-2.5 rounded-xl bg-primary hover:bg-primary-dark active:scale-[0.98] text-white text-xs font-semibold shadow-sm transition-all"
+                  className="px-5 py-2.5 rounded-xl bg-primary hover:bg-primary-dark active:scale-[0.98] text-white text-xs font-semibold shadow-sm transition-all flex items-center gap-1.5 cursor-pointer"
                 >
-                  Simpan Tugas
+                  <Plus size={16} weight="bold" />
+                  <span>
+                    {newCategory === 'KEPANITIAAN' && committeeActivityType === 'RAPAT'
+                      ? 'Jadwalkan Rapat'
+                      : newCategory === 'LOMBA'
+                      ? 'Tambah Milestone'
+                      : 'Simpan Tugas'}
+                  </span>
                 </button>
               </div>
             </form>

@@ -11,26 +11,23 @@ import {
   Users, 
   Medal, 
   Hourglass, 
-  X, 
   CheckCircle,
-  Check
+  CaretRight,
+  Sparkle
 } from '@phosphor-icons/react';
 import { cn } from '@/lib/utils';
+import { formatCountdown } from '@/lib/date-utils';
+import { CompetitionModal } from '@/components/lomba/competition-modal';
+import { CompetitionDetailModal } from '@/components/lomba/competition-detail-modal';
 
 export default function LombaPage() {
-  const { competitions, addCompetition } = useApp();
+  const { competitions, tasks } = useApp();
   const [activeFilter, setActiveFilter] = useState<string>('ALL');
-  const [isModalOpen, setIsModalOpen] = useState(false);
 
-  // Form State
-  const [name, setName] = useState('');
-  const [category, setCategory] = useState('UI/UX Design');
-  const [level, setLevel] = useState('Nasional');
-  const [status, setStatus] = useState<CompetitionStatus>('PROSES_PENGERJAAN');
-  const [description, setDescription] = useState('');
-  const [date, setDate] = useState('2026-10-15');
-  const [time, setTime] = useState('23:59');
-  const [members, setMembers] = useState('AR, KH, RT');
+  // Modals state
+  const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
+  const [editingCompetition, setEditingCompetition] = useState<Competition | null>(null);
+  const [detailCompetition, setDetailCompetition] = useState<Competition | null>(null);
 
   const filteredCompetitions = competitions.filter((comp) => {
     if (activeFilter === 'ALL') return true;
@@ -42,28 +39,18 @@ export default function LombaPage() {
   const countSubmit = competitions.filter((c) => c.status === 'SUDAH_SUBMIT').length;
   const countHasil = competitions.filter((c) => c.status === 'HASIL_KELUAR').length;
 
-  const handleCreateCompetition = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!name.trim()) return;
+  // Compute urgent deadlines
+  const urgentCount = competitions.filter((c) => {
+    if (c.status !== 'PROSES_PENGERJAAN') return false;
+    const cd = formatCountdown(c.submission_deadline);
+    return cd.isUrgent;
+  }).length;
 
-    addCompetition({
-      name: name.trim(),
-      category,
-      level,
-      status,
-      description: description.trim() || undefined,
-      submission_deadline: `${date}T${time}:00`,
-      deadlineDisplay: `Tenggat ${date.split('-')[2]} ${date.split('-')[1]}`,
-      team_members: members.trim() || 'AR',
-      progressPct: status === 'HASIL_KELUAR' || status === 'SUDAH_SUBMIT' ? 100 : status === 'PROSES_PENGERJAAN' ? 40 : 0,
-      progressDone: status === 'HASIL_KELUAR' ? 5 : status === 'PROSES_PENGERJAAN' ? 2 : 0,
-      progressTotal: 5,
-    });
-
-    setName('');
-    setDescription('');
-    setIsModalOpen(false);
-  };
+  // Overall milestone progress across all competitions
+  const allLombaTasks = tasks.filter((t) => t.category === 'LOMBA');
+  const totalLombaTasks = allLombaTasks.length;
+  const doneLombaTasks = allLombaTasks.filter((t) => t.status === 'SELESAI').length;
+  const overallTaskPct = totalLombaTasks > 0 ? Math.round((doneLombaTasks / totalLombaTasks) * 100) : 0;
 
   return (
     <div className="flex flex-col gap-8">
@@ -77,7 +64,10 @@ export default function LombaPage() {
         </div>
         <button
           type="button"
-          onClick={() => setIsModalOpen(true)}
+          onClick={() => {
+            setEditingCompetition(null);
+            setIsCreateModalOpen(true);
+          }}
           className="inline-flex items-center justify-center gap-2 bg-primary hover:bg-primary-dark text-white font-semibold text-sm py-2.5 px-5 rounded-xl shadow-[0_4px_16px_rgba(124,92,252,0.25)] transition-all active:scale-[0.98] cursor-pointer shrink-0"
         >
           <Plus size={18} weight="bold" />
@@ -102,21 +92,31 @@ export default function LombaPage() {
               Ringkasan Aktivitas
             </span>
             <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-text-primary mt-1">
-              <span className="font-bold text-text-primary">{competitions.length} Kompetisi Terdaftar</span>
+              <span className="font-bold text-text-primary">
+                {competitions.length} Kompetisi Terdaftar
+              </span>
               <span className="text-border-subtle">•</span>
-              <span className="text-semantic-urgent font-semibold">1 Mendekati Deadline</span>
+              <span className="text-semantic-urgent font-semibold">
+                {urgentCount} Mendekati Deadline
+              </span>
               <span className="text-border-subtle">•</span>
-              <span className="text-primary font-medium">1 Menunggu Hasil</span>
+              <span className="text-primary font-medium">
+                {countSubmit} Menunggu Hasil
+              </span>
               <span className="text-border-subtle">•</span>
-              <span className="text-status-completed font-semibold">1 Prestasi</span>
+              <span className="text-status-completed font-semibold">
+                {countHasil} Prestasi
+              </span>
             </div>
           </div>
         </div>
 
         <div className="hidden lg:flex items-center gap-3 pl-5 border-l border-border-subtle">
           <div className="text-right">
-            <span className="text-[11px] text-text-secondary block">Tingkat Penyelesaian</span>
-            <span className="font-display text-sm font-bold text-text-primary">75% Target Selesai</span>
+            <span className="text-[11px] text-text-secondary block">Tingkat Milestone</span>
+            <span className="font-display text-sm font-bold text-text-primary">
+              {totalLombaTasks > 0 ? `${overallTaskPct}% Target Selesai` : 'Mulai Tetapkan Tugas'}
+            </span>
           </div>
           <div className="w-10 h-10 relative flex items-center justify-center">
             <svg className="w-9 h-9 transform -rotate-90" viewBox="0 0 36 36">
@@ -132,7 +132,7 @@ export default function LombaPage() {
                 d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831"
                 fill="none"
                 stroke="currentColor"
-                strokeDasharray="75, 100"
+                strokeDasharray={`${overallTaskPct}, 100`}
                 strokeLinecap="round"
                 strokeWidth="3.5"
               />
@@ -229,7 +229,7 @@ export default function LombaPage() {
         </button>
       </div>
 
-      {/* 4. Cards Grid (Exact 4 Cards + 1 Add Card from Stitch) */}
+      {/* 4. Cards Grid */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 pt-2">
         {filteredCompetitions.map((comp) => {
           const isProses = comp.status === 'PROSES_PENGERJAAN';
@@ -237,15 +237,33 @@ export default function LombaPage() {
           const isSubmit = comp.status === 'SUDAH_SUBMIT';
           const isHasil = comp.status === 'HASIL_KELUAR';
 
+          // Calculate tasks progress dynamically from real tasks
+          const compTasks = tasks.filter(
+            (t) =>
+              t.category === 'LOMBA' &&
+              (t.parent_id === comp.id ||
+                (!t.parent_id && t.parent_title?.trim().toLowerCase() === comp.name?.trim().toLowerCase()))
+          );
+          const doneTasks = compTasks.filter((t) => t.status === 'SELESAI').length;
+          const totalTasks = compTasks.length;
+          const progressPct = totalTasks > 0
+            ? Math.round((doneTasks / totalTasks) * 100)
+            : (isHasil || isSubmit ? 100 : 0);
+
+          // Countdown helper
+          const subCountdown = formatCountdown(comp.submission_deadline, 'Submit');
+          const regCountdown = comp.reg_deadline ? formatCountdown(comp.reg_deadline, 'Daftar') : null;
+
           const avatarList = comp.team_members
-            ? comp.team_members.split(',').map((m) => m.trim().slice(0, 2).toUpperCase())
+            ? comp.team_members.split(',').map((m) => m.trim().slice(0, 2).toUpperCase()).filter(Boolean)
             : ['AR'];
 
           return (
             <div
               key={comp.id}
+              onClick={() => setDetailCompetition(comp)}
               className={cn(
-                'relative bg-surface-card rounded-2xl card-spec flex flex-col justify-between overflow-hidden transition-all duration-200 hover:-translate-y-1',
+                'relative bg-surface-card rounded-2xl card-spec flex flex-col justify-between overflow-hidden transition-all duration-200 hover:-translate-y-1 cursor-pointer group',
                 isProses
                   ? 'border border-category-lomba/40 ring-2 ring-category-lomba/20'
                   : 'border border-border-subtle'
@@ -255,27 +273,27 @@ export default function LombaPage() {
 
               <div className="p-5 flex flex-col gap-3.5">
                 <div className="flex items-start justify-between gap-2">
-                  <h3 className="font-display text-base font-bold text-text-primary leading-tight">
+                  <h3 className="font-display text-base font-bold text-text-primary leading-tight group-hover:text-primary transition-colors">
                     {comp.name}
                   </h3>
                   
                   {isProses && (
-                    <span className="inline-flex items-center text-[11px] font-semibold px-2.5 py-0.5 rounded-full bg-category-lomba-tint text-[#B45309]">
-                      Proses Pengerjaan
+                    <span className="inline-flex items-center text-[11px] font-semibold px-2.5 py-0.5 rounded-full bg-category-lomba-tint text-[#B45309] shrink-0">
+                      Proses Kerja
                     </span>
                   )}
                   {isMendaftar && (
-                    <span className="inline-flex items-center text-[11px] font-semibold px-2.5 py-0.5 rounded-full bg-[#FFF8EB] text-[#C27803]">
+                    <span className="inline-flex items-center text-[11px] font-semibold px-2.5 py-0.5 rounded-full bg-[#FFF8EB] text-[#C27803] shrink-0">
                       Mendaftar
                     </span>
                   )}
                   {isSubmit && (
-                    <span className="inline-flex items-center text-[11px] font-semibold px-2.5 py-0.5 rounded-full bg-category-kuliah-tint text-[#4F46E5]">
+                    <span className="inline-flex items-center text-[11px] font-semibold px-2.5 py-0.5 rounded-full bg-category-kuliah-tint text-[#4F46E5] shrink-0">
                       Sudah Submit
                     </span>
                   )}
                   {isHasil && (
-                    <span className="inline-flex items-center text-[11px] font-semibold px-2.5 py-0.5 rounded-full bg-status-completed-tint text-[#16A34A]">
+                    <span className="inline-flex items-center text-[11px] font-semibold px-2.5 py-0.5 rounded-full bg-status-completed-tint text-[#16A34A] shrink-0">
                       Hasil Keluar
                     </span>
                   )}
@@ -285,7 +303,7 @@ export default function LombaPage() {
                   {comp.description || 'Fokus pada pengembangan inovasi dan pemecahan masalah.'}
                 </p>
 
-                {/* Progress bar */}
+                {/* Dynamic Progress bar */}
                 <div className="flex flex-col gap-1 mt-1">
                   <div className="h-2 w-full bg-status-not-started-tint rounded-full overflow-hidden">
                     <div
@@ -293,16 +311,17 @@ export default function LombaPage() {
                         'h-full rounded-full transition-all duration-500',
                         isHasil ? 'bg-status-completed' : 'bg-category-lomba'
                       )}
-                      style={{ width: `${comp.progressPct ?? (isHasil || isSubmit ? 100 : isProses ? 57 : 0)}%` }}
+                      style={{ width: `${progressPct}%` }}
                     />
                   </div>
                   <div className="flex items-center justify-between text-[11px] text-text-secondary">
                     <span>
-                      {comp.progressDone ?? (isHasil || isSubmit ? 5 : isProses ? 4 : 0)} dari{' '}
-                      {comp.progressTotal ?? (isHasil || isSubmit ? 5 : isProses ? 7 : 2)} tugas selesai
+                      {totalTasks > 0
+                        ? `${doneTasks} dari ${totalTasks} tugas selesai`
+                        : `${progressPct}% progres milestone`}
                     </span>
                     <span className="font-bold text-text-primary">
-                      {comp.progressPct ?? (isHasil || isSubmit ? 100 : isProses ? 57 : 0)}%
+                      {progressPct}%
                     </span>
                   </div>
                 </div>
@@ -311,29 +330,32 @@ export default function LombaPage() {
               {/* Card Footer */}
               <div className="px-5 pb-5">
                 <div className="border-t border-border-subtle pt-3 flex items-center justify-between">
-                  {/* Left status badge */}
+                  {/* Left status & countdown badge */}
                   {isProses && (
-                    <div className="flex items-center gap-1.5 text-semantic-urgent text-xs font-semibold">
+                    <div className={cn(
+                      'flex items-center gap-1.5 text-xs font-semibold',
+                      subCountdown.isUrgent ? 'text-semantic-urgent' : 'text-text-secondary'
+                    )}>
                       <HourglassHigh size={16} />
-                      <span>{comp.deadlineDisplay || 'Submit 3 hari lagi'}</span>
+                      <span>{subCountdown.text}</span>
                     </div>
                   )}
                   {isMendaftar && (
                     <div className="flex items-center gap-1.5 text-text-secondary text-xs">
                       <CalendarBlank size={16} />
-                      <span>{comp.deadlineDisplay || 'Daftar 12 hari lagi'}</span>
+                      <span>{regCountdown ? regCountdown.text : subCountdown.text}</span>
                     </div>
                   )}
                   {isSubmit && (
                     <div className="flex items-center gap-1.5 text-text-secondary text-xs">
                       <Hourglass size={16} />
-                      <span>{comp.deadlineDisplay || 'Menunggu pengumuman'}</span>
+                      <span>Menunggu pengumuman</span>
                     </div>
                   )}
                   {isHasil && (
                     <div className="inline-flex items-center gap-1.5 bg-status-completed-tint text-status-completed text-xs px-2.5 py-0.5 rounded-full font-bold">
                       <Medal size={16} weight="bold" />
-                      <span>{comp.achievement || 'Juara 3'}</span>
+                      <span>{comp.achievement || 'Selesai'}</span>
                     </div>
                   )}
 
@@ -350,7 +372,7 @@ export default function LombaPage() {
                         <div
                           key={idx}
                           className={cn(
-                            'w-7 h-7 rounded-full flex items-center justify-center text-[11px] font-bold ring-2 ring-white',
+                            'w-7 h-7 rounded-full flex items-center justify-center text-[10px] font-bold ring-2 ring-white',
                             bgClasses[idx % bgClasses.length]
                           )}
                           title={av}
@@ -366,9 +388,12 @@ export default function LombaPage() {
           );
         })}
 
-        {/* Card 5: Add New Card Placeholder (From Stitch) */}
+        {/* Add New Card Placeholder (Stitch Specimen) */}
         <div
-          onClick={() => setIsModalOpen(true)}
+          onClick={() => {
+            setEditingCompetition(null);
+            setIsCreateModalOpen(true);
+          }}
           className="border-2 border-dashed border-border-subtle hover:border-primary rounded-2xl p-6 flex flex-col items-center justify-center text-center cursor-pointer min-h-[220px] bg-white/50 hover:bg-surface-card transition-all duration-200 group card-spec"
         >
           <div className="w-12 h-12 rounded-full bg-page-background group-hover:bg-primary-fixed flex items-center justify-center text-text-secondary group-hover:text-primary transition-colors mb-3">
@@ -383,199 +408,32 @@ export default function LombaPage() {
         </div>
       </div>
 
-      {/* ==================== MODAL DAFTARKAN LOMBA ==================== */}
-      {isModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-[#1F1B2E]/45 backdrop-blur-xs animate-in fade-in duration-150">
-          <div className="w-full max-w-[500px] bg-surface-card rounded-2xl border border-border-subtle shadow-modal flex flex-col overflow-hidden animate-in zoom-in-95 duration-150">
-            {/* Modal Header */}
-            <div className="px-6 py-4 border-b border-border-subtle flex items-center justify-between bg-surface-card">
-              <div className="flex items-center gap-2.5">
-                <div className="w-8 h-8 rounded-xl bg-category-lomba-tint text-[#B45309] flex items-center justify-center">
-                  <Trophy size={18} weight="bold" />
-                </div>
-                <div>
-                  <h2 className="font-display text-base font-bold text-text-primary">Daftarkan Lomba Baru</h2>
-                  <p className="text-[11px] text-text-secondary">Catat target kompetisi, tenggat submisi, dan susunan tim</p>
-                </div>
-              </div>
-              <button
-                type="button"
-                onClick={() => setIsModalOpen(false)}
-                className="w-8 h-8 rounded-lg flex items-center justify-center text-text-secondary hover:bg-status-not-started-tint hover:text-text-primary transition-colors"
-              >
-                <X size={18} />
-              </button>
-            </div>
-
-            {/* Form Body */}
-            <form onSubmit={handleCreateCompetition} className="p-6 flex flex-col gap-4 max-h-[82vh] overflow-y-auto">
-              <div className="flex flex-col gap-1.5">
-                <label className="text-xs font-semibold text-text-primary">Nama Kompetisi</label>
-                <input
-                  type="text"
-                  required
-                  value={name}
-                  onChange={(e) => setName(e.target.value)}
-                  placeholder="Misal: UI/UX National Challenge 2026..."
-                  className="w-full h-10 px-3.5 bg-surface-card border border-border-subtle rounded-xl text-xs text-text-primary focus:outline-none focus:border-primary transition-all"
-                />
-              </div>
-
-              <div className="grid grid-cols-2 gap-3">
-                <div className="flex flex-col gap-1.5">
-                  <label className="text-xs font-semibold text-text-primary">Kategori Kompetisi</label>
-                  <select
-                    value={category}
-                    onChange={(e) => setCategory(e.target.value)}
-                    className="w-full h-10 px-3.5 bg-surface-card border border-border-subtle rounded-xl text-xs text-text-primary focus:outline-none focus:border-primary transition-all cursor-pointer"
-                  >
-                    <option value="UI/UX Design">UI/UX Design</option>
-                    <option value="Hackathon">Hackathon</option>
-                    <option value="Business Case">Business Case</option>
-                    <option value="LKTI">LKTI / Karya Tulis</option>
-                    <option value="Datathon">Datathon</option>
-                    <option value="Competitive Programming">Competitive Programming</option>
-                    <option value="Lainnya">Lainnya</option>
-                  </select>
-                </div>
-
-                <div className="flex flex-col gap-1.5">
-                  <label className="text-xs font-semibold text-text-primary">Tingkat Penyelenggaraan</label>
-                  <select
-                    value={level}
-                    onChange={(e) => setLevel(e.target.value)}
-                    className="w-full h-10 px-3.5 bg-surface-card border border-border-subtle rounded-xl text-xs text-text-primary focus:outline-none focus:border-primary transition-all cursor-pointer"
-                  >
-                    <option value="Nasional">Nasional</option>
-                    <option value="Internasional">Internasional</option>
-                    <option value="Regional">Regional</option>
-                    <option value="Universitas">Universitas</option>
-                  </select>
-                </div>
-              </div>
-
-              {/* Status Kompetisi Selector */}
-              <div className="flex flex-col gap-1.5">
-                <label className="text-xs font-semibold text-text-primary">Status Kompetisi</label>
-                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-                  <button
-                    type="button"
-                    onClick={() => setStatus('MENDAFTAR')}
-                    className={cn(
-                      'py-1.5 px-2 rounded-xl border text-[11px] font-medium flex items-center justify-center transition-all',
-                      status === 'MENDAFTAR'
-                        ? 'border-category-lomba bg-category-lomba-tint text-[#B45309] font-semibold border-2'
-                        : 'border-border-subtle bg-surface-card text-text-secondary'
-                    )}
-                  >
-                    Mendaftar
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setStatus('PROSES_PENGERJAAN')}
-                    className={cn(
-                      'py-1.5 px-2 rounded-xl border text-[11px] font-medium flex items-center justify-center transition-all',
-                      status === 'PROSES_PENGERJAAN'
-                        ? 'border-category-lomba bg-category-lomba-tint text-[#B45309] font-semibold border-2'
-                        : 'border-border-subtle bg-surface-card text-text-secondary'
-                    )}
-                  >
-                    Proses Kerja
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setStatus('SUDAH_SUBMIT')}
-                    className={cn(
-                      'py-1.5 px-2 rounded-xl border text-[11px] font-medium flex items-center justify-center transition-all',
-                      status === 'SUDAH_SUBMIT'
-                        ? 'border-category-lomba bg-category-lomba-tint text-[#B45309] font-semibold border-2'
-                        : 'border-border-subtle bg-surface-card text-text-secondary'
-                    )}
-                  >
-                    Sudah Submit
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setStatus('HASIL_KELUAR')}
-                    className={cn(
-                      'py-1.5 px-2 rounded-xl border text-[11px] font-medium flex items-center justify-center transition-all',
-                      status === 'HASIL_KELUAR'
-                        ? 'border-category-lomba bg-category-lomba-tint text-[#B45309] font-semibold border-2'
-                        : 'border-border-subtle bg-surface-card text-text-secondary'
-                    )}
-                  >
-                    Hasil Keluar
-                  </button>
-                </div>
-              </div>
-
-              {/* Deskripsi */}
-              <div className="flex flex-col gap-1.5">
-                <label className="text-xs font-semibold text-text-primary">Deskripsi Singkat / Fokus Proyek</label>
-                <textarea
-                  rows={2}
-                  value={description}
-                  onChange={(e) => setDescription(e.target.value)}
-                  placeholder="Misal: Redesain aplikasi transportasi untuk lansia ramah aksesibilitas..."
-                  className="w-full px-3.5 py-2.5 bg-surface-card border border-border-subtle rounded-xl text-xs text-text-primary focus:outline-none focus:border-primary transition-all resize-none"
-                />
-              </div>
-
-              {/* Deadline */}
-              <div className="flex flex-col gap-1.5">
-                <label className="text-xs font-semibold text-text-primary">Tenggat Pengumpulan (Deadline Submission)</label>
-                <div className="grid grid-cols-2 gap-3">
-                  <input
-                    type="date"
-                    required
-                    value={date}
-                    onChange={(e) => setDate(e.target.value)}
-                    className="h-10 px-3 bg-surface-card border border-border-subtle rounded-xl text-xs text-text-primary focus:outline-none focus:border-primary transition-all"
-                  />
-                  <input
-                    type="time"
-                    required
-                    value={time}
-                    onChange={(e) => setTime(e.target.value)}
-                    className="h-10 px-3 bg-surface-card border border-border-subtle rounded-xl text-xs text-text-primary focus:outline-none focus:border-primary transition-all"
-                  />
-                </div>
-              </div>
-
-              {/* Members */}
-              <div className="flex flex-col gap-1.5">
-                <label className="text-xs font-semibold text-text-primary">Anggota Tim (Inisial / Nama)</label>
-                <input
-                  type="text"
-                  value={members}
-                  onChange={(e) => setMembers(e.target.value)}
-                  placeholder="Misal: AR, KH, RT"
-                  className="w-full h-10 px-3.5 bg-surface-card border border-border-subtle rounded-xl text-xs text-text-primary focus:outline-none focus:border-primary transition-all"
-                />
-              </div>
-
-              {/* Action Buttons */}
-              <div className="flex items-center justify-end gap-3 pt-3 border-t border-border-subtle mt-1">
-                <button
-                  type="button"
-                  onClick={() => setIsModalOpen(false)}
-                  className="px-4 py-2 rounded-xl text-xs font-semibold text-text-secondary hover:bg-page-background transition-colors"
-                >
-                  Batal
-                </button>
-                <button
-                  type="submit"
-                  className="px-5 py-2.5 rounded-xl bg-primary hover:bg-primary-dark active:scale-[0.98] text-white text-xs font-semibold shadow-sm transition-all flex items-center gap-1.5"
-                >
-                  <Plus size={16} weight="bold" />
-                  <span>Daftarkan Lomba</span>
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
+      {/* Modal Tambah / Edit Lomba */}
+      {isCreateModalOpen && (
+        <CompetitionModal
+          isOpen={isCreateModalOpen}
+          onClose={() => {
+            setIsCreateModalOpen(false);
+            setEditingCompetition(null);
+          }}
+          editingCompetition={editingCompetition}
+        />
       )}
 
+      {/* Modal Detail Lomba */}
+      {detailCompetition && (
+        <CompetitionDetailModal
+          isOpen={!!detailCompetition}
+          onClose={() => setDetailCompetition(null)}
+          competition={detailCompetition}
+          onEditCompetition={() => {
+            const comp = detailCompetition;
+            setDetailCompetition(null);
+            setEditingCompetition(comp);
+            setIsCreateModalOpen(true);
+          }}
+        />
+      )}
     </div>
   );
 }
