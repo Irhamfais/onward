@@ -20,7 +20,12 @@ import {
   X,
   Alarm,
   MapPin,
-  VideoCamera
+  VideoCamera,
+  CaretLeft,
+  CaretRight,
+  ArrowSquareOut,
+  Funnel,
+  ArrowRight
 } from '@phosphor-icons/react';
 import { cn } from '@/lib/utils';
 import { formatDateDisplay } from '@/lib/date-utils';
@@ -33,6 +38,9 @@ export default function DashboardPage() {
     courses, 
     competitions, 
     committees, 
+    meetings,
+    semesters,
+    activeSemesterId,
     searchQuery, 
     cycleTaskStatus, 
     deleteTask, 
@@ -44,6 +52,29 @@ export default function DashboardPage() {
   // Filters
   const [selectedCategory, setSelectedCategory] = useState<string>('ALL');
   const [selectedStatus, setSelectedStatus] = useState<string>('ALL');
+  const [selectedDateFilter, setSelectedDateFilter] = useState<string | null>(null);
+
+  // Mini Calendar Navigation State
+  const [calendarViewDate, setCalendarViewDate] = useState<Date>(() => new Date());
+
+  const activeSemester = useMemo(() => {
+    return semesters.find((s) => s.id === activeSemesterId) || semesters[0] || { name: 'Semester Ganjil 2026/2027' };
+  }, [semesters, activeSemesterId]);
+
+  const handlePrevMonth = () => {
+    setCalendarViewDate((prev) => new Date(prev.getFullYear(), prev.getMonth() - 1, 1));
+  };
+
+  const handleNextMonth = () => {
+    setCalendarViewDate((prev) => new Date(prev.getFullYear(), prev.getMonth() + 1, 1));
+  };
+
+  const handleResetToToday = () => {
+    const today = new Date();
+    setCalendarViewDate(today);
+    const todayStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+    setSelectedDateFilter(todayStr);
+  };
 
   // Modal Add Task
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -101,14 +132,15 @@ export default function DashboardPage() {
       .filter((task) => {
         const matchesCategory = selectedCategory === 'ALL' || task.category === selectedCategory;
         const matchesStatus = selectedStatus === 'ALL' || task.status === selectedStatus;
+        const matchesDate = !selectedDateFilter || (task.deadline && task.deadline.startsWith(selectedDateFilter));
         const matchesSearch =
           !searchQuery ||
           task.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
           task.parent_title.toLowerCase().includes(searchQuery.toLowerCase());
-        return matchesCategory && matchesStatus && matchesSearch;
+        return matchesCategory && matchesStatus && matchesDate && matchesSearch;
       })
       .sort((a, b) => new Date(a.deadline).getTime() - new Date(b.deadline).getTime());
-  }, [tasks, selectedCategory, selectedStatus, searchQuery]);
+  }, [tasks, selectedCategory, selectedStatus, selectedDateFilter, searchQuery]);
 
   // Nearest deadlines (top 3 upcoming incomplete)
   const nearestDeadlines = useMemo(() => {
@@ -179,6 +211,158 @@ export default function DashboardPage() {
   const kuliahOffset = 0;
   const lombaOffset = -(kuliahRatio * circumference);
   const kepanitiaanOffset = -((kuliahRatio + lombaRatio) * circumference);
+
+  // Dynamic Mini Calendar Data
+  const calendarData = useMemo(() => {
+    const year = calendarViewDate.getFullYear();
+    const month = calendarViewDate.getMonth();
+
+    const monthNames = [
+      'Januari', 'Februari', 'Maret', 'April', 'Mei', 'Juni',
+      'Juli', 'Agustus', 'September', 'Oktober', 'November', 'Desember'
+    ];
+    const monthTitle = `${monthNames[month]} ${year}`;
+
+    // Day 0 = Sunday, 1 = Monday ... 6 = Saturday
+    const firstDayIndex = new Date(year, month, 1).getDay();
+    // Monday-based offset (0 = Mon ... 6 = Sun)
+    const startOffset = firstDayIndex === 0 ? 6 : firstDayIndex - 1;
+
+    const daysInMonth = new Date(year, month + 1, 0).getDate();
+    const daysInPrevMonth = new Date(year, month, 0).getDate();
+
+    const today = new Date();
+    const todayStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+
+    // Map tasks to dates for colored dots
+    const dateTaskMap = new Map<string, { kuliah: boolean; lomba: boolean; kepanitiaan: boolean; count: number }>();
+    tasks.forEach((t) => {
+      if (!t.deadline) return;
+      const datePart = t.deadline.split('T')[0];
+      if (!dateTaskMap.has(datePart)) {
+        dateTaskMap.set(datePart, { kuliah: false, lomba: false, kepanitiaan: false, count: 0 });
+      }
+      const entry = dateTaskMap.get(datePart)!;
+      entry.count++;
+      if (t.category === 'KULIAH') entry.kuliah = true;
+      if (t.category === 'LOMBA') entry.lomba = true;
+      if (t.category === 'KEPANITIAAN') entry.kepanitiaan = true;
+    });
+
+    const days = [];
+
+    // Prev month padding
+    for (let i = startOffset - 1; i >= 0; i--) {
+      const dayNum = daysInPrevMonth - i;
+      const prevDate = new Date(year, month - 1, dayNum);
+      const dateStr = `${prevDate.getFullYear()}-${String(prevDate.getMonth() + 1).padStart(2, '0')}-${String(dayNum).padStart(2, '0')}`;
+      days.push({
+        dayNum,
+        dateStr,
+        isCurrentMonth: false,
+        isToday: dateStr === todayStr,
+        tasks: dateTaskMap.get(dateStr) || null,
+      });
+    }
+
+    // Current month days
+    for (let d = 1; d <= daysInMonth; d++) {
+      const dateStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+      days.push({
+        dayNum: d,
+        dateStr,
+        isCurrentMonth: true,
+        isToday: dateStr === todayStr,
+        tasks: dateTaskMap.get(dateStr) || null,
+      });
+    }
+
+    // Next month padding to fill out complete 7-column rows (35 or 42 cells)
+    const remaining = (7 - (days.length % 7)) % 7;
+    for (let nextDay = 1; nextDay <= remaining; nextDay++) {
+      const nextDate = new Date(year, month + 1, nextDay);
+      const dateStr = `${nextDate.getFullYear()}-${String(nextDate.getMonth() + 1).padStart(2, '0')}-${String(nextDay).padStart(2, '0')}`;
+      days.push({
+        dayNum: nextDay,
+        dateStr,
+        isCurrentMonth: false,
+        isToday: dateStr === todayStr,
+        tasks: dateTaskMap.get(dateStr) || null,
+      });
+    }
+
+    return {
+      monthTitle,
+      days,
+    };
+  }, [calendarViewDate, tasks]);
+
+  // Weekly Activity / Progress Line Chart Data (Monday to Sunday)
+  const weeklyChartData = useMemo(() => {
+    const now = new Date();
+    const currentDay = now.getDay(); // 0 = Sun, 1 = Mon ... 6 = Sat
+    const distanceToMonday = currentDay === 0 ? -6 : 1 - currentDay;
+    const monday = new Date(now.getFullYear(), now.getMonth(), now.getDate() + distanceToMonday);
+
+    const dayLabels = ['Sen', 'Sel', 'Rab', 'Kam', 'Jum', 'Sab', 'Min'];
+    let totalCompletedThisWeek = 0;
+
+    const days = [];
+    for (let i = 0; i < 7; i++) {
+      const d = new Date(monday.getFullYear(), monday.getMonth(), monday.getDate() + i);
+      const dateStr = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+
+      // Tasks on this day
+      const tasksOnDay = tasks.filter((t) => t.deadline && t.deadline.startsWith(dateStr));
+      const completedOnDay = tasksOnDay.filter((t) => t.status === 'SELESAI').length;
+      totalCompletedThisWeek += completedOnDay;
+
+      // Activity score: completed tasks weight + pending tasks weight
+      const score = completedOnDay > 0 ? completedOnDay * 1.5 + (tasksOnDay.length - completedOnDay) * 0.5 : tasksOnDay.length;
+
+      days.push({
+        dayLabel: dayLabels[i],
+        dateStr,
+        isToday: d.toDateString() === now.toDateString(),
+        completedCount: completedOnDay,
+        totalTasks: tasksOnDay.length,
+        score,
+      });
+    }
+
+    // SVG coordinates calculation
+    const xCoords = [30, 95, 160, 225, 290, 355, 420];
+    const maxScore = Math.max(...days.map((d) => d.score), 4);
+    const baselineY = 125;
+    const heightRange = 95;
+
+    const points = days.map((day, idx) => {
+      const x = xCoords[idx];
+      const y = Math.round(baselineY - (day.score / maxScore) * heightRange);
+      return { ...day, x, y };
+    });
+
+    // Build smooth cubic Bezier path
+    let linePath = `M ${points[0].x} ${points[0].y}`;
+    for (let i = 0; i < points.length - 1; i++) {
+      const p0 = points[i];
+      const p1 = points[i + 1];
+      const cpX1 = Math.round(p0.x + (p1.x - p0.x) / 2);
+      const cpY1 = p0.y;
+      const cpX2 = Math.round(p0.x + (p1.x - p0.x) / 2);
+      const cpY2 = p1.y;
+      linePath += ` C ${cpX1} ${cpY1}, ${cpX2} ${cpY2}, ${p1.x} ${p1.y}`;
+    }
+
+    const areaPath = `${linePath} L ${points[points.length - 1].x} ${baselineY} L ${points[0].x} ${baselineY} Z`;
+
+    return {
+      points,
+      linePath,
+      areaPath,
+      totalCompletedThisWeek,
+    };
+  }, [tasks]);
 
   const handleCreateTask = (e: React.FormEvent) => {
     e.preventDefault();
@@ -268,11 +452,21 @@ export default function DashboardPage() {
         </button>
       </div>
 
-      {/* 2. Four Summary Stat Cards with authentic 3D Tactile Icon Badges */}
+      {/* 2. Four Summary Stat Cards with authentic 3D Tactile Icon Badges & Quick Filter */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 md:gap-5">
         
-        {/* Card 1: Total Tugas Aktif (Purple Badge) */}
-        <div className="bg-surface-card rounded-2xl p-5 card-spec border border-border-subtle flex items-center gap-4 transition-all hover:-translate-y-0.5">
+        {/* Card 1: Total Tugas (Purple Badge) */}
+        <button
+          type="button"
+          onClick={() => setSelectedStatus('ALL')}
+          title="Tampilkan semua tugas"
+          className={cn(
+            "bg-surface-card rounded-2xl p-5 card-spec border text-left flex items-center gap-4 transition-all hover:-translate-y-0.5 cursor-pointer",
+            selectedStatus === 'ALL'
+              ? "border-primary/50 shadow-[0_4px_16px_rgba(124,92,252,0.12)] ring-2 ring-primary/20"
+              : "border-border-subtle hover:border-primary/30"
+          )}
+        >
           <div
             className="w-12 h-12 rounded-xl flex items-center justify-center text-white shrink-0"
             style={{
@@ -282,16 +476,31 @@ export default function DashboardPage() {
           >
             <ClipboardText size={24} weight="bold" />
           </div>
-          <div className="flex flex-col">
+          <div className="flex flex-col min-w-0">
             <span className="font-display text-2xl font-bold text-text-primary">
               {stats.total}
             </span>
-            <span className="text-xs text-text-secondary mt-0.5">Total Tugas Aktif</span>
+            <div className="flex items-center gap-1.5 mt-0.5">
+              <span className="text-xs text-text-secondary">Total Tugas</span>
+              {selectedStatus === 'ALL' && (
+                <span className="text-[10px] font-semibold text-primary bg-primary-fixed/60 px-1.5 py-0.2 rounded-full">Semua</span>
+              )}
+            </div>
           </div>
-        </div>
+        </button>
 
         {/* Card 2: Belum Mulai (Gray Badge) */}
-        <div className="bg-surface-card rounded-2xl p-5 card-spec border border-border-subtle flex items-center gap-4 transition-all hover:-translate-y-0.5">
+        <button
+          type="button"
+          onClick={() => setSelectedStatus(prev => prev === 'BELUM_MULAI' ? 'ALL' : 'BELUM_MULAI')}
+          title="Filter tugas yang belum mulai"
+          className={cn(
+            "bg-surface-card rounded-2xl p-5 card-spec border text-left flex items-center gap-4 transition-all hover:-translate-y-0.5 cursor-pointer",
+            selectedStatus === 'BELUM_MULAI'
+              ? "border-text-secondary/50 shadow-sm ring-2 ring-text-secondary/20 bg-status-not-started-tint/30"
+              : "border-border-subtle hover:border-text-secondary/30"
+          )}
+        >
           <div
             className="w-12 h-12 rounded-xl flex items-center justify-center text-white shrink-0"
             style={{
@@ -301,16 +510,31 @@ export default function DashboardPage() {
           >
             <Clock size={24} weight="bold" />
           </div>
-          <div className="flex flex-col">
+          <div className="flex flex-col min-w-0">
             <span className="font-display text-2xl font-bold text-text-primary">
               {stats.notStarted}
             </span>
-            <span className="text-xs text-text-secondary mt-0.5">Belum Mulai</span>
+            <div className="flex items-center gap-1.5 mt-0.5">
+              <span className="text-xs text-text-secondary">Belum Mulai</span>
+              {selectedStatus === 'BELUM_MULAI' && (
+                <span className="text-[10px] font-semibold text-text-primary bg-status-not-started-tint px-1.5 py-0.2 rounded-full">Aktif</span>
+              )}
+            </div>
           </div>
-        </div>
+        </button>
 
         {/* Card 3: Sedang Dikerjakan (Orange Badge) */}
-        <div className="bg-surface-card rounded-2xl p-5 card-spec border border-border-subtle flex items-center gap-4 transition-all hover:-translate-y-0.5">
+        <button
+          type="button"
+          onClick={() => setSelectedStatus(prev => prev === 'SEDANG_DIKERJAKAN' ? 'ALL' : 'SEDANG_DIKERJAKAN')}
+          title="Filter tugas yang sedang dikerjakan"
+          className={cn(
+            "bg-surface-card rounded-2xl p-5 card-spec border text-left flex items-center gap-4 transition-all hover:-translate-y-0.5 cursor-pointer",
+            selectedStatus === 'SEDANG_DIKERJAKAN'
+              ? "border-status-in-progress/50 shadow-sm ring-2 ring-status-in-progress/20 bg-status-in-progress-tint/30"
+              : "border-border-subtle hover:border-status-in-progress/30"
+          )}
+        >
           <div
             className="w-12 h-12 rounded-xl flex items-center justify-center text-white shrink-0"
             style={{
@@ -320,16 +544,31 @@ export default function DashboardPage() {
           >
             <HourglassHigh size={24} weight="bold" />
           </div>
-          <div className="flex flex-col">
+          <div className="flex flex-col min-w-0">
             <span className="font-display text-2xl font-bold text-text-primary">
               {stats.inProgress}
             </span>
-            <span className="text-xs text-text-secondary mt-0.5">Sedang Dikerjakan</span>
+            <div className="flex items-center gap-1.5 mt-0.5">
+              <span className="text-xs text-text-secondary">Sedang Dikerjakan</span>
+              {selectedStatus === 'SEDANG_DIKERJAKAN' && (
+                <span className="text-[10px] font-semibold text-status-in-progress bg-status-in-progress-tint px-1.5 py-0.2 rounded-full">Aktif</span>
+              )}
+            </div>
           </div>
-        </div>
+        </button>
 
         {/* Card 4: Selesai (Green Badge) */}
-        <div className="bg-surface-card rounded-2xl p-5 card-spec border border-border-subtle flex items-center gap-4 transition-all hover:-translate-y-0.5">
+        <button
+          type="button"
+          onClick={() => setSelectedStatus(prev => prev === 'SELESAI' ? 'ALL' : 'SELESAI')}
+          title="Filter tugas yang sudah selesai"
+          className={cn(
+            "bg-surface-card rounded-2xl p-5 card-spec border text-left flex items-center gap-4 transition-all hover:-translate-y-0.5 cursor-pointer",
+            selectedStatus === 'SELESAI'
+              ? "border-status-completed/50 shadow-sm ring-2 ring-status-completed/20 bg-status-completed-tint/30"
+              : "border-border-subtle hover:border-status-completed/30"
+          )}
+        >
           <div
             className="w-12 h-12 rounded-xl flex items-center justify-center text-white shrink-0"
             style={{
@@ -339,13 +578,18 @@ export default function DashboardPage() {
           >
             <CheckCircle size={24} weight="bold" />
           </div>
-          <div className="flex flex-col">
+          <div className="flex flex-col min-w-0">
             <span className="font-display text-2xl font-bold text-text-primary">
               {stats.completed}
             </span>
-            <span className="text-xs text-text-secondary mt-0.5">Selesai</span>
+            <div className="flex items-center gap-1.5 mt-0.5">
+              <span className="text-xs text-text-secondary">Selesai</span>
+              {selectedStatus === 'SELESAI' && (
+                <span className="text-[10px] font-semibold text-status-completed bg-status-completed-tint px-1.5 py-0.2 rounded-full">Aktif</span>
+              )}
+            </div>
           </div>
-        </div>
+        </button>
 
       </div>
 
@@ -363,7 +607,7 @@ export default function DashboardPage() {
             </div>
 
             {/* Filter Dropdowns */}
-            <div className="flex items-center gap-2">
+            <div className="flex items-center flex-wrap gap-2">
               <select
                 value={selectedCategory}
                 onChange={(e) => setSelectedCategory(e.target.value)}
@@ -388,6 +632,24 @@ export default function DashboardPage() {
             </div>
           </div>
 
+          {/* Date Filter Badge if active from Mini Calendar */}
+          {selectedDateFilter && (
+            <div className="flex items-center justify-between p-2.5 px-3.5 my-3 rounded-xl bg-primary/10 border border-primary/20 text-xs text-primary font-medium">
+              <div className="flex items-center gap-2">
+                <CalendarBlank size={16} weight="bold" />
+                <span>Filter Tanggal Kalender: <strong>{formatDateDisplay(selectedDateFilter)}</strong></span>
+              </div>
+              <button
+                type="button"
+                onClick={() => setSelectedDateFilter(null)}
+                className="hover:bg-primary/20 px-2 py-0.5 rounded-md transition-colors flex items-center gap-1 text-[11px] font-semibold cursor-pointer"
+              >
+                <X size={13} weight="bold" />
+                <span>Hapus Filter Tanggal</span>
+              </button>
+            </div>
+          )}
+
           {/* Task List Container */}
           <div className="flex flex-col divide-y divide-border-subtle/80 pt-2 min-h-[300px]">
             {filteredTasks.length === 0 ? (
@@ -396,14 +658,40 @@ export default function DashboardPage() {
                   <CheckCircle size={24} />
                 </div>
                 <p className="text-sm font-semibold text-text-primary">Tidak ada tugas ditemukan</p>
-                <p className="text-xs text-text-secondary mt-1">Coba ubah filter atau kata kunci pencarian Anda.</p>
+                <p className="text-xs text-text-secondary mt-1 max-w-sm">
+                  {selectedDateFilter
+                    ? `Tidak ada tugas dengan batas waktu pada ${formatDateDisplay(selectedDateFilter)}.`
+                    : 'Coba sesuaikan filter atau kata kunci pencarian Anda.'}
+                </p>
+                {(selectedCategory !== 'ALL' || selectedStatus !== 'ALL' || selectedDateFilter || searchQuery) && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSelectedCategory('ALL');
+                      setSelectedStatus('ALL');
+                      setSelectedDateFilter(null);
+                    }}
+                    className="mt-3 text-xs font-semibold text-primary hover:underline cursor-pointer"
+                  >
+                    Reset Semua Filter
+                  </button>
+                )}
               </div>
             ) : (
               filteredTasks.map((t) => {
-                // Urgent threshold: within 48h of demo baseline 2026-09-16
+                // Urgent threshold: within 48h of now or overdue
+                const taskTime = new Date(t.deadline).getTime();
+                const nowTime = new Date().getTime();
                 const isUrgent =
-                  new Date(t.deadline).getTime() - new Date('2026-09-16T19:00:00').getTime() < 48 * 3600 * 1000 &&
+                  taskTime - nowTime < 48 * 3600 * 1000 &&
                   t.status !== 'SELESAI';
+
+                const moduleUrl = 
+                  t.category === 'KULIAH'
+                    ? `/kuliah${t.parent_id ? `?highlight=${t.parent_id}` : ''}`
+                    : t.category === 'LOMBA'
+                    ? `/lomba${t.parent_id ? `?highlight=${t.parent_id}` : ''}`
+                    : `/kepanitiaan${t.parent_id ? `?highlight=${t.parent_id}` : ''}`;
 
                 return (
                   <div
@@ -433,16 +721,23 @@ export default function DashboardPage() {
                       </button>
 
                       <div className="flex flex-col min-w-0">
-                        <span
-                          className={cn(
-                            'font-display font-semibold text-[15px] truncate',
-                            t.status === 'SELESAI' ? 'line-through text-text-secondary' : 'text-text-primary'
-                          )}
-                        >
-                          {t.title}
-                        </span>
                         <Link
-                          href={t.category === 'KULIAH' ? '/kuliah' : t.category === 'LOMBA' ? '/lomba' : '/kepanitiaan'}
+                          href={moduleUrl}
+                          className="group/title inline-flex items-center gap-1.5 hover:text-primary transition-colors max-w-full"
+                          title={`Buka detail di modul ${t.category.toLowerCase()}`}
+                        >
+                          <span
+                            className={cn(
+                              'font-display font-semibold text-[15px] truncate group-hover/title:underline',
+                              t.status === 'SELESAI' ? 'line-through text-text-secondary' : 'text-text-primary'
+                            )}
+                          >
+                            {t.title}
+                          </span>
+                          <ArrowSquareOut size={13} className="opacity-0 group-hover/title:opacity-100 text-primary transition-opacity shrink-0" />
+                        </Link>
+                        <Link
+                          href={moduleUrl}
                           className="text-xs text-text-secondary hover:text-primary transition-colors truncate mt-0.5 inline-block hover:underline"
                           title={`Buka modul ${t.category.toLowerCase()}`}
                         >
@@ -508,11 +803,18 @@ export default function DashboardPage() {
                       )}
 
                       {/* Action buttons */}
+                      <Link
+                        href={moduleUrl}
+                        title={`Buka detail di modul ${t.category.toLowerCase()}`}
+                        className="w-8 h-8 rounded-lg flex items-center justify-center text-text-secondary hover:text-primary hover:bg-primary/10 transition-colors"
+                      >
+                        <ArrowSquareOut size={16} />
+                      </Link>
                       <button
                         type="button"
                         onClick={() => cycleTaskStatus(t.id)}
-                        title="Ubah status tugas"
-                        className="w-8 h-8 rounded-lg flex items-center justify-center text-text-secondary hover:text-text-primary hover:bg-white transition-colors"
+                        title="Ubah status tugas (Belum Mulai -> Sedang Dikerjakan -> Selesai)"
+                        className="w-8 h-8 rounded-lg flex items-center justify-center text-text-secondary hover:text-text-primary hover:bg-white transition-colors cursor-pointer"
                       >
                         <ArrowsClockwise size={16} />
                       </button>
@@ -520,7 +822,7 @@ export default function DashboardPage() {
                         type="button"
                         onClick={() => deleteTask(t.id)}
                         title="Hapus tugas"
-                        className="w-8 h-8 rounded-lg flex items-center justify-center text-text-secondary hover:text-semantic-urgent hover:bg-semantic-urgent-tint transition-colors"
+                        className="w-8 h-8 rounded-lg flex items-center justify-center text-text-secondary hover:text-semantic-urgent hover:bg-semantic-urgent-tint transition-colors cursor-pointer"
                       >
                         <Trash size={16} />
                       </button>
@@ -543,65 +845,123 @@ export default function DashboardPage() {
         {/* RIGHT COLUMN: Mini Kalender & Target Ringkas (4 cols) */}
         <div className="lg:col-span-4 flex flex-col gap-6">
           
-          {/* Mini Calendar (September 2026) */}
+          {/* Mini Calendar (Fully Dynamic with Category Dots & Month Navigation) */}
           <div className="bg-surface-card rounded-2xl p-5 border border-border-subtle card-spec flex flex-col">
-            <div className="flex items-center justify-between mb-4">
-              <span className="font-display font-bold text-sm text-text-primary">
-                Kalender • September 2026
-              </span>
-              <span className="text-xs text-primary font-semibold">Semester Ganjil</span>
+            <div className="flex items-center justify-between mb-3">
+              <div className="flex items-center gap-1.5 min-w-0">
+                <span className="font-display font-bold text-sm text-text-primary truncate">
+                  {calendarData.monthTitle}
+                </span>
+                <span className="text-[10px] text-primary font-semibold bg-primary/10 px-2 py-0.5 rounded-full shrink-0">
+                  {activeSemester?.name?.split(' ')[0] || 'Semester Aktif'}
+                </span>
+              </div>
+
+              {/* Month Navigation Controls */}
+              <div className="flex items-center gap-1 shrink-0">
+                <button
+                  type="button"
+                  onClick={handleResetToToday}
+                  title="Kembali ke hari ini"
+                  className="px-2 py-1 text-[11px] font-semibold text-text-secondary hover:text-primary hover:bg-page-background rounded-lg transition-colors cursor-pointer"
+                >
+                  Hari Ini
+                </button>
+                <button
+                  type="button"
+                  onClick={handlePrevMonth}
+                  title="Bulan sebelumnya"
+                  className="w-7 h-7 rounded-lg flex items-center justify-center text-text-secondary hover:text-text-primary hover:bg-page-background transition-colors cursor-pointer"
+                >
+                  <CaretLeft size={14} weight="bold" />
+                </button>
+                <button
+                  type="button"
+                  onClick={handleNextMonth}
+                  title="Bulan berikutnya"
+                  className="w-7 h-7 rounded-lg flex items-center justify-center text-text-secondary hover:text-text-primary hover:bg-page-background transition-colors cursor-pointer"
+                >
+                  <CaretRight size={14} weight="bold" />
+                </button>
+              </div>
             </div>
 
-            {/* Weekday Header */}
-            <div className="grid grid-cols-7 text-center text-xs font-medium text-text-secondary mb-2">
+            {/* Weekday Header (Sen - Min) */}
+            <div className="grid grid-cols-7 text-center text-xs font-semibold text-text-secondary mb-1.5">
               <span>Sen</span><span>Sel</span><span>Rab</span><span>Kam</span><span>Jum</span><span>Sab</span><span>Min</span>
             </div>
 
-            {/* Days Grid */}
+            {/* Dynamic Days Grid */}
             <div className="grid grid-cols-7 gap-1 text-center text-xs">
-              {/* Aug 31 */}
-              <span className="py-1.5 text-text-secondary/40">31</span>
-              {/* Sep 1 to 30 */}
-              {Array.from({ length: 30 }).map((_, i) => {
-                const day = i + 1;
-                const isToday = day === 16;
-                const hasTaskKuliah = [18, 23, 25, 27].includes(day);
-                const hasTaskLomba = [19, 21, 28].includes(day);
-                const hasTaskPanitia = [20, 22, 26].includes(day);
+              {calendarData.days.map((cell, idx) => {
+                const isSelected = selectedDateFilter === cell.dateStr;
+                const hasAnyTask = cell.tasks && cell.tasks.count > 0;
 
                 return (
-                  <div
-                    key={day}
+                  <button
+                    key={`${cell.dateStr}-${idx}`}
+                    type="button"
+                    onClick={() => {
+                      if (!cell.isCurrentMonth) {
+                        // Switch month view if clicking padding day
+                        const targetD = new Date(cell.dateStr);
+                        setCalendarViewDate(targetD);
+                      }
+                      setSelectedDateFilter((prev) => (prev === cell.dateStr ? null : cell.dateStr));
+                    }}
+                    title={
+                      cell.tasks 
+                        ? `${cell.dateStr}: ${cell.tasks.count} tugas (Klik untuk filter)` 
+                        : `${cell.dateStr} (Klik untuk filter)`
+                    }
                     className={cn(
-                      'py-1.5 rounded-lg flex flex-col items-center justify-center relative transition-colors',
-                      isToday ? 'bg-primary text-white font-bold shadow-xs' : 'hover:bg-page-background text-text-primary'
+                      'py-1.5 px-0.5 rounded-xl flex flex-col items-center justify-center relative transition-all min-h-[38px] cursor-pointer',
+                      !cell.isCurrentMonth && 'text-text-secondary/35 hover:text-text-secondary/70',
+                      cell.isCurrentMonth && !cell.isToday && !isSelected && 'hover:bg-page-background text-text-primary',
+                      cell.isToday && !isSelected && 'bg-primary text-white font-bold shadow-xs',
+                      isSelected && 'ring-2 ring-primary bg-primary/10 font-bold text-primary',
+                      cell.isToday && isSelected && 'bg-primary text-white ring-2 ring-primary ring-offset-2'
                     )}
                   >
-                    <span>{day}</span>
-                    {/* Indicators */}
-                    <div className="flex items-center justify-center gap-0.5 mt-0.5 h-1">
-                      {hasTaskKuliah && (
-                        <span className={cn('w-1 h-1 rounded-full', isToday ? 'bg-white' : 'bg-category-kuliah')} />
+                    <span className="text-xs">{cell.dayNum}</span>
+
+                    {/* Category Dots Container */}
+                    <div className="flex items-center justify-center gap-0.5 mt-0.5 h-1.5">
+                      {cell.tasks?.kuliah && (
+                        <span
+                          className={cn(
+                            'w-1.5 h-1.5 rounded-full shrink-0',
+                            cell.isToday && !isSelected ? 'bg-white' : 'bg-category-kuliah'
+                          )}
+                          title="Ada tugas Kuliah"
+                        />
                       )}
-                      {hasTaskLomba && (
-                        <span className={cn('w-1 h-1 rounded-full', isToday ? 'bg-white' : 'bg-category-lomba')} />
+                      {cell.tasks?.lomba && (
+                        <span
+                          className={cn(
+                            'w-1.5 h-1.5 rounded-full shrink-0',
+                            cell.isToday && !isSelected ? 'bg-white' : 'bg-category-lomba'
+                          )}
+                          title="Ada tugas Lomba"
+                        />
                       )}
-                      {hasTaskPanitia && (
-                        <span className={cn('w-1 h-1 rounded-full', isToday ? 'bg-white' : 'bg-category-kepanitiaan')} />
+                      {cell.tasks?.kepanitiaan && (
+                        <span
+                          className={cn(
+                            'w-1.5 h-1.5 rounded-full shrink-0',
+                            cell.isToday && !isSelected ? 'bg-white' : 'bg-category-kepanitiaan'
+                          )}
+                          title="Ada tugas Kepanitiaan"
+                        />
                       )}
                     </div>
-                  </div>
+                  </button>
                 );
               })}
-              {/* Oct 1 to 4 */}
-              <span className="py-1.5 text-text-secondary/40">1</span>
-              <span className="py-1.5 text-text-secondary/40">2</span>
-              <span className="py-1.5 text-text-secondary/40">3</span>
-              <span className="py-1.5 text-text-secondary/40">4</span>
             </div>
 
             {/* Calendar Legend */}
-            <div className="mt-4 pt-3 border-t border-border-subtle flex items-center justify-around text-[10px] text-text-secondary">
+            <div className="mt-3.5 pt-3 border-t border-border-subtle flex items-center justify-around text-[11px] text-text-secondary">
               <span className="flex items-center gap-1.5">
                 <span className="w-2 h-2 rounded-full bg-category-kuliah" />Kuliah
               </span>
@@ -614,51 +974,95 @@ export default function DashboardPage() {
             </div>
           </div>
 
-          {/* Overall Progress Card (67% target) */}
+          {/* Overall Progress Card (% tugas selesai) */}
           <div className="bg-surface-card rounded-2xl p-5 border border-border-subtle card-spec flex flex-col">
             <div className="flex items-center justify-between mb-2">
               <span className="font-display font-semibold text-xs text-text-secondary uppercase tracking-wider">
                 Progress Keseluruhan
               </span>
-              <span className="text-xs font-bold text-primary">
+              <span className="text-sm font-bold text-primary">
                 {stats.completionPercentage}%
               </span>
             </div>
-            <div className="w-full h-2.5 bg-status-not-started-tint rounded-full overflow-hidden mb-3">
+            
+            {/* Animated Progress Bar */}
+            <div className="w-full h-3 bg-status-not-started-tint rounded-full overflow-hidden mb-3">
               <div
-                className="h-full bg-primary rounded-full transition-all duration-500"
+                className="h-full bg-gradient-to-r from-primary to-primary-light rounded-full transition-all duration-700"
                 style={{ width: `${stats.completionPercentage}%` }}
               />
             </div>
+            
             <p className="text-xs text-text-secondary">
-              {stats.completed} dari {stats.total} tugas telah diselesaikan dengan baik.
+              {stats.total > 0 
+                ? `${stats.completed} dari ${stats.total} tugas telah diselesaikan (${stats.completionPercentage}%).`
+                : 'Belum ada tugas yang dibuat. Klik tombol + Tambah Tugas untuk memulai!'}
             </p>
+
+            {/* Mini Progress Breakdown */}
+            <div className="grid grid-cols-3 gap-2 mt-3 pt-3 border-t border-border-subtle/80 text-center text-[11px]">
+              <div className="flex flex-col">
+                <span className="font-bold text-text-secondary">{stats.notStarted}</span>
+                <span className="text-[10px] text-text-secondary/80">Belum</span>
+              </div>
+              <div className="flex flex-col">
+                <span className="font-bold text-status-in-progress">{stats.inProgress}</span>
+                <span className="text-[10px] text-text-secondary/80">Proses</span>
+              </div>
+              <div className="flex flex-col">
+                <span className="font-bold text-status-completed">{stats.completed}</span>
+                <span className="text-[10px] text-text-secondary/80">Selesai</span>
+              </div>
+            </div>
           </div>
 
           {/* Deadline Terdekat Card */}
           <div className="bg-surface-card rounded-2xl p-5 border border-border-subtle card-spec flex flex-col">
-            <span className="font-display font-bold text-sm text-text-primary mb-3">
-              Deadline Terdekat
-            </span>
+            <div className="flex items-center justify-between mb-3">
+              <span className="font-display font-bold text-sm text-text-primary">
+                Deadline Terdekat
+              </span>
+              <span className="text-[11px] text-text-secondary">Tenggat Terdekat</span>
+            </div>
+
             <div className="flex flex-col gap-2.5">
-              {nearestDeadlines.map((t) => (
-                <div
-                  key={t.id}
-                  className="p-3 rounded-xl border border-border-subtle bg-white hover:border-primary/40 transition-colors flex items-start justify-between gap-2"
-                >
-                  <div className="flex flex-col min-w-0">
-                    <span className="text-xs font-semibold text-text-primary truncate">
-                      {t.title}
-                    </span>
-                    <span className="text-[11px] text-text-secondary truncate mt-0.5">
-                      {t.parent_title}
-                    </span>
-                  </div>
-                  <span className="shrink-0 px-2 py-0.5 rounded-full text-[10px] font-bold bg-semantic-urgent-tint text-semantic-urgent">
-                    {t.deadlineDisplay || t.deadline.split('T')[0]}
-                  </span>
+              {nearestDeadlines.length === 0 ? (
+                <div className="py-6 flex flex-col items-center justify-center text-center text-xs text-text-secondary">
+                  <CheckCircle size={28} className="text-status-completed mb-1.5 opacity-80" />
+                  <p className="font-medium text-text-primary">Semua tugas beres!</p>
+                  <p className="text-[11px] mt-0.5">Tidak ada tugas mendesak saat ini.</p>
                 </div>
-              ))}
+              ) : (
+                nearestDeadlines.map((t) => {
+                  const moduleUrl = 
+                    t.category === 'KULIAH'
+                      ? `/kuliah${t.parent_id ? `?highlight=${t.parent_id}` : ''}`
+                      : t.category === 'LOMBA'
+                      ? `/lomba${t.parent_id ? `?highlight=${t.parent_id}` : ''}`
+                      : `/kepanitiaan${t.parent_id ? `?highlight=${t.parent_id}` : ''}`;
+
+                  return (
+                    <Link
+                      key={t.id}
+                      href={moduleUrl}
+                      className="group p-3 rounded-xl border border-border-subtle bg-white hover:border-primary/50 hover:shadow-xs transition-all flex items-start justify-between gap-2"
+                      title={`Buka modul ${t.category.toLowerCase()}`}
+                    >
+                      <div className="flex flex-col min-w-0">
+                        <span className="text-xs font-semibold text-text-primary group-hover:text-primary transition-colors truncate">
+                          {t.title}
+                        </span>
+                        <span className="text-[11px] text-text-secondary truncate mt-0.5">
+                          {t.parent_title}
+                        </span>
+                      </div>
+                      <span className="shrink-0 px-2 py-0.5 rounded-full text-[10px] font-bold bg-semantic-urgent-tint text-semantic-urgent">
+                        {t.deadlineDisplay || t.deadline.split('T')[0]}
+                      </span>
+                    </Link>
+                  );
+                })
+              )}
             </div>
           </div>
 
@@ -679,42 +1083,62 @@ export default function DashboardPage() {
             {/* Donut Chart SVG */}
             <div className="relative w-40 h-40 flex items-center justify-center shrink-0">
               <svg className="w-full h-full transform -rotate-90" viewBox="0 0 100 100">
-                {/* Kuliah circle */}
-                <circle
-                  cx="50"
-                  cy="50"
-                  fill="transparent"
-                  r="38"
-                  stroke="#6C8CFF"
-                  strokeDasharray={kuliahDash}
-                  strokeDashoffset={kuliahOffset}
-                  strokeWidth="12"
-                  className="transition-all duration-500"
-                />
-                {/* Lomba circle */}
-                <circle
-                  cx="50"
-                  cy="50"
-                  fill="transparent"
-                  r="38"
-                  stroke="#FFB648"
-                  strokeDasharray={lombaDash}
-                  strokeDashoffset={lombaOffset}
-                  strokeWidth="12"
-                  className="transition-all duration-500"
-                />
-                {/* Kepanitiaan circle */}
-                <circle
-                  cx="50"
-                  cy="50"
-                  fill="transparent"
-                  r="38"
-                  stroke="#35C0A5"
-                  strokeDasharray={kepanitiaanDash}
-                  strokeDashoffset={kepanitiaanOffset}
-                  strokeWidth="12"
-                  className="transition-all duration-500"
-                />
+                {tasks.length === 0 ? (
+                  // Neutral empty ring when no tasks
+                  <circle
+                    cx="50"
+                    cy="50"
+                    fill="transparent"
+                    r="38"
+                    stroke="#E7E3F5"
+                    strokeWidth="12"
+                  />
+                ) : (
+                  <>
+                    {/* Kuliah circle */}
+                    {kuliahCount > 0 && (
+                      <circle
+                        cx="50"
+                        cy="50"
+                        fill="transparent"
+                        r="38"
+                        stroke="#6C8CFF"
+                        strokeDasharray={kuliahDash}
+                        strokeDashoffset={kuliahOffset}
+                        strokeWidth="12"
+                        className="transition-all duration-500"
+                      />
+                    )}
+                    {/* Lomba circle */}
+                    {lombaCount > 0 && (
+                      <circle
+                        cx="50"
+                        cy="50"
+                        fill="transparent"
+                        r="38"
+                        stroke="#FFB648"
+                        strokeDasharray={lombaDash}
+                        strokeDashoffset={lombaOffset}
+                        strokeWidth="12"
+                        className="transition-all duration-500"
+                      />
+                    )}
+                    {/* Kepanitiaan circle */}
+                    {kepanitiaanCount > 0 && (
+                      <circle
+                        cx="50"
+                        cy="50"
+                        fill="transparent"
+                        r="38"
+                        stroke="#35C0A5"
+                        strokeDasharray={kepanitiaanDash}
+                        strokeDashoffset={kepanitiaanOffset}
+                        strokeWidth="12"
+                        className="transition-all duration-500"
+                      />
+                    )}
+                  </>
+                )}
               </svg>
               <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
                 <span className="font-display text-2xl font-bold text-text-primary leading-tight">
@@ -724,14 +1148,19 @@ export default function DashboardPage() {
               </div>
             </div>
 
-            {/* Legend */}
-            <div className="flex flex-col gap-3 w-full max-w-[200px]">
+            {/* Legend with percentages */}
+            <div className="flex flex-col gap-3 w-full max-w-[210px]">
               <div className="flex items-center justify-between p-2 rounded-xl hover:bg-page-background transition-colors">
                 <div className="flex items-center gap-2.5">
                   <span className="w-3 h-3 rounded-full bg-category-kuliah shrink-0" />
                   <span className="text-xs font-medium text-text-primary">Kuliah</span>
                 </div>
-                <span className="text-xs font-bold text-text-primary">{kuliahCount}</span>
+                <div className="flex items-center gap-1.5">
+                  <span className="text-xs font-bold text-text-primary">{kuliahCount}</span>
+                  <span className="text-[10px] text-text-secondary">
+                    ({tasks.length > 0 ? Math.round((kuliahCount / tasks.length) * 100) : 0}%)
+                  </span>
+                </div>
               </div>
 
               <div className="flex items-center justify-between p-2 rounded-xl hover:bg-page-background transition-colors">
@@ -739,7 +1168,12 @@ export default function DashboardPage() {
                   <span className="w-3 h-3 rounded-full bg-category-lomba shrink-0" />
                   <span className="text-xs font-medium text-text-primary">Lomba</span>
                 </div>
-                <span className="text-xs font-bold text-text-primary">{lombaCount}</span>
+                <div className="flex items-center gap-1.5">
+                  <span className="text-xs font-bold text-text-primary">{lombaCount}</span>
+                  <span className="text-[10px] text-text-secondary">
+                    ({tasks.length > 0 ? Math.round((lombaCount / tasks.length) * 100) : 0}%)
+                  </span>
+                </div>
               </div>
 
               <div className="flex items-center justify-between p-2 rounded-xl hover:bg-page-background transition-colors">
@@ -747,22 +1181,27 @@ export default function DashboardPage() {
                   <span className="w-3 h-3 rounded-full bg-category-kepanitiaan shrink-0" />
                   <span className="text-xs font-medium text-text-primary">Kepanitiaan</span>
                 </div>
-                <span className="text-xs font-bold text-text-primary">{kepanitiaanCount}</span>
+                <div className="flex items-center gap-1.5">
+                  <span className="text-xs font-bold text-text-primary">{kepanitiaanCount}</span>
+                  <span className="text-[10px] text-text-secondary">
+                    ({tasks.length > 0 ? Math.round((kepanitiaanCount / tasks.length) * 100) : 0}%)
+                  </span>
+                </div>
               </div>
             </div>
           </div>
         </div>
 
-        {/* Card 2: Aktivitas Minggu Ini (Area Curve Chart SVG) */}
+        {/* Card 2: Aktivitas Minggu Ini (Dynamic Area Curve Chart SVG) */}
         <div className="bg-surface-card rounded-2xl p-6 border border-border-subtle card-spec">
           <div className="flex items-center justify-between mb-4">
             <div>
               <h3 className="font-display text-base font-bold text-text-primary">Aktivitas Minggu Ini</h3>
-              <p className="text-xs text-text-secondary mt-0.5">Tugas selesai per hari</p>
+              <p className="text-xs text-text-secondary mt-0.5">Tugas selesai & deadline harian</p>
             </div>
             <div className="flex items-center gap-1.5 text-xs text-primary bg-primary-fixed/60 px-2.5 py-1 rounded-full font-semibold">
               <span className="w-2 h-2 rounded-full bg-primary" />
-              <span>16 Selesai</span>
+              <span>{weeklyChartData.totalCompletedThisWeek} Selesai Minggu Ini</span>
             </div>
           </div>
 
@@ -770,7 +1209,7 @@ export default function DashboardPage() {
             <svg className="w-full h-32 overflow-visible" viewBox="0 0 460 140">
               <defs>
                 <linearGradient id="chartGradient" x1="0" x2="0" y1="0" y2="1">
-                  <stop offset="0%" stopColor="#7C5CFC" stopOpacity="0.22" />
+                  <stop offset="0%" stopColor="#7C5CFC" stopOpacity="0.25" />
                   <stop offset="100%" stopColor="#7C5CFC" stopOpacity="0.0" />
                 </linearGradient>
               </defs>
@@ -779,39 +1218,65 @@ export default function DashboardPage() {
               <line stroke="#E7E3F5" strokeDasharray="3 3" strokeWidth="1" x1="20" x2="440" y1="90" y2="90" />
               <line stroke="#E7E3F5" strokeWidth="1" x1="20" x2="440" y1="125" y2="125" />
 
-              {/* Area path */}
+              {/* Dynamic Area path */}
               <path
-                d="M 30 125 L 30 100 C 60 75, 75 45, 95 45 C 115 45, 140 75, 160 75 C 180 75, 205 20, 225 20 C 245 20, 270 75, 290 75 C 310 75, 335 45, 355 45 C 375 45, 400 100, 420 100 L 420 125 Z"
+                d={weeklyChartData.areaPath}
                 fill="url(#chartGradient)"
+                className="transition-all duration-500"
               />
-              {/* Line path */}
+              {/* Dynamic Line path */}
               <path
-                d="M 30 100 C 60 75, 75 45, 95 45 C 115 45, 140 75, 160 75 C 180 75, 205 20, 225 20 C 245 20, 270 75, 290 75 C 310 75, 335 45, 355 45 C 375 45, 400 100, 420 100"
+                d={weeklyChartData.linePath}
                 fill="none"
                 stroke="#7C5CFC"
                 strokeLinecap="round"
                 strokeLinejoin="round"
                 strokeWidth="3"
+                className="transition-all duration-500"
               />
 
               {/* Points */}
-              <circle cx="30" cy="100" fill="#FFFFFF" r="4.5" stroke="#7C5CFC" strokeWidth="2.5" />
-              <circle cx="95" cy="45" fill="#FFFFFF" r="4.5" stroke="#7C5CFC" strokeWidth="2.5" />
-              <circle cx="160" cy="75" fill="#FFFFFF" r="4.5" stroke="#7C5CFC" strokeWidth="2.5" />
-              <circle cx="225" cy="20" fill="#7C5CFC" r="5" stroke="#FFFFFF" strokeWidth="2.5" />
-              <circle cx="290" cy="75" fill="#FFFFFF" r="4.5" stroke="#7C5CFC" strokeWidth="2.5" />
-              <circle cx="355" cy="45" fill="#FFFFFF" r="4.5" stroke="#7C5CFC" strokeWidth="2.5" />
-              <circle cx="420" cy="100" fill="#FFFFFF" r="4.5" stroke="#7C5CFC" strokeWidth="2.5" />
+              {weeklyChartData.points.map((pt, idx) => (
+                <g key={idx} className="cursor-pointer">
+                  <circle
+                    cx={pt.x}
+                    cy={pt.y}
+                    fill={pt.isToday ? '#7C5CFC' : '#FFFFFF'}
+                    r={pt.isToday ? 5.5 : 4.5}
+                    stroke="#7C5CFC"
+                    strokeWidth="2.5"
+                    className="transition-all duration-300"
+                  >
+                    <title>{`${pt.dayLabel} (${pt.dateStr}): ${pt.completedCount} selesai dari ${pt.totalTasks} tugas`}</title>
+                  </circle>
+                  {pt.completedCount > 0 && (
+                    <text
+                      x={pt.x}
+                      y={pt.y - 8}
+                      textAnchor="middle"
+                      className="text-[10px] font-bold fill-primary select-none"
+                    >
+                      {pt.completedCount}
+                    </text>
+                  )}
+                </g>
+              ))}
             </svg>
 
+            {/* Weekday Labels on X Axis */}
             <div className="grid grid-cols-7 text-center text-xs text-text-secondary pt-2">
-              <span>Sen</span>
-              <span>Sel</span>
-              <span>Rab</span>
-              <span className="font-bold text-primary">Kam</span>
-              <span>Jum</span>
-              <span>Sab</span>
-              <span>Min</span>
+              {weeklyChartData.points.map((pt, idx) => (
+                <span
+                  key={idx}
+                  className={cn(
+                    'transition-colors py-0.5 rounded-md',
+                    pt.isToday ? 'font-bold text-primary bg-primary/10' : 'text-text-secondary'
+                  )}
+                  title={`${pt.dayLabel}: ${pt.dateStr}`}
+                >
+                  {pt.dayLabel}
+                </span>
+              ))}
             </div>
           </div>
         </div>

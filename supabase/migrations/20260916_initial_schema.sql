@@ -1,5 +1,5 @@
 -- Onward Schema Migration: Initial Relational Tables, RLS, & Unified Tasks View
--- Based on agents.md Blueprint Section 3
+-- Based on agents.md Blueprint Section 3 + Synchronized with App Models
 
 -- Enable UUID extension if not enabled
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
@@ -11,6 +11,8 @@ CREATE TABLE IF NOT EXISTS public.profiles (
     email VARCHAR(255) NOT NULL,
     phone_wa VARCHAR(50),
     is_wa_verified BOOLEAN DEFAULT FALSE,
+    major VARCHAR(100) DEFAULT 'Mahasiswa Onward',
+    semester SMALLINT DEFAULT 1,
     avatar_url TEXT,
     created_at TIMESTAMPTZ DEFAULT NOW(),
     updated_at TIMESTAMPTZ DEFAULT NOW()
@@ -45,7 +47,11 @@ CREATE TABLE IF NOT EXISTS public.course_schedules (
 );
 
 -- 4. COURSE TASKS (Tugas Kuliah)
-CREATE TYPE public.task_status AS ENUM ('BELUM_MULAI', 'SEDANG_DIKERJAKAN', 'SELESAI');
+DO $$ BEGIN
+    CREATE TYPE public.task_status AS ENUM ('BELUM_MULAI', 'SEDANG_DIKERJAKAN', 'SELESAI');
+EXCEPTION
+    WHEN duplicate_object THEN null;
+END $$;
 
 CREATE TABLE IF NOT EXISTS public.course_tasks (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -59,18 +65,24 @@ CREATE TABLE IF NOT EXISTS public.course_tasks (
 );
 
 -- 5. COMPETITIONS (Lomba)
-CREATE TYPE public.competition_status AS ENUM ('MENDAFTAR', 'PROSES_PENGERJAAN', 'SUDAH_SUBMIT', 'HASIL_KELUAR');
+DO $$ BEGIN
+    CREATE TYPE public.competition_status AS ENUM ('MENDAFTAR', 'PROSES_PENGERJAAN', 'SUDAH_SUBMIT', 'HASIL_KELUAR');
+EXCEPTION
+    WHEN duplicate_object THEN null;
+END $$;
 
 CREATE TABLE IF NOT EXISTS public.competitions (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     user_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
     name VARCHAR(255) NOT NULL,
     category VARCHAR(100),
+    level VARCHAR(50) DEFAULT 'Nasional',
     description TEXT,
     reg_deadline TIMESTAMPTZ,
     submission_deadline TIMESTAMPTZ NOT NULL,
     team_members TEXT,
     status public.competition_status NOT NULL DEFAULT 'PROSES_PENGERJAAN',
+    achievement VARCHAR(255),
     related_links TEXT[],
     created_at TIMESTAMPTZ DEFAULT NOW(),
     updated_at TIMESTAMPTZ DEFAULT NOW()
@@ -83,6 +95,7 @@ CREATE TABLE IF NOT EXISTS public.competition_tasks (
     title VARCHAR(255) NOT NULL,
     deadline TIMESTAMPTZ NOT NULL,
     status public.task_status NOT NULL DEFAULT 'BELUM_MULAI',
+    notes TEXT,
     created_at TIMESTAMPTZ DEFAULT NOW(),
     updated_at TIMESTAMPTZ DEFAULT NOW()
 );
@@ -93,6 +106,7 @@ CREATE TABLE IF NOT EXISTS public.committees (
     user_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
     organization_event_name VARCHAR(255) NOT NULL,
     role_division VARCHAR(150) NOT NULL,
+    role VARCHAR(100) DEFAULT 'Anggota Aktif',
     start_date DATE NOT NULL,
     end_date DATE NOT NULL,
     notes TEXT,
@@ -121,28 +135,31 @@ CREATE TABLE IF NOT EXISTS public.committee_tasks (
     title VARCHAR(255) NOT NULL,
     deadline TIMESTAMPTZ NOT NULL,
     status public.task_status NOT NULL DEFAULT 'BELUM_MULAI',
+    notes TEXT,
     created_at TIMESTAMPTZ DEFAULT NOW(),
     updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
 -- =====================================================================
--- 10. UNIFIED TASKS VIEW (Query Agregasi Dashboard - Sesuai agents.md 3.3)
+-- 10. UNIFIED TASKS VIEW (Query Agregasi Dashboard)
 -- =====================================================================
-CREATE OR REPLACE VIEW public.unified_tasks_view AS
-SELECT 
-    ct.id, 
-    ct.title, 
-    ct.deadline, 
-    ct.status, 
-    'KULIAH' AS category, 
-    cs.course_name AS parent_title, 
-    cs.id AS parent_id,
-    s.user_id,
-    ct.created_at,
-    ct.updated_at
-FROM public.course_tasks ct
-JOIN public.course_schedules cs ON ct.course_id = cs.id
-JOIN public.semesters s ON cs.semester_id = s.id
+    DROP VIEW IF EXISTS public.unified_tasks_view CASCADE;
+    CREATE OR REPLACE VIEW public.unified_tasks_view AS
+    SELECT 
+        ct.id, 
+        ct.title, 
+        ct.deadline, 
+        ct.status, 
+        'KULIAH' AS category, 
+        cs.course_name AS parent_title, 
+        cs.id AS parent_id,
+        ct.notes,
+        s.user_id,
+        ct.created_at,
+        ct.updated_at
+    FROM public.course_tasks ct
+    JOIN public.course_schedules cs ON ct.course_id = cs.id
+    JOIN public.semesters s ON cs.semester_id = s.id
 
 UNION ALL
 
@@ -154,6 +171,7 @@ SELECT
     'LOMBA' AS category, 
     c.name AS parent_title, 
     c.id AS parent_id,
+    cpt.notes,
     c.user_id,
     cpt.created_at,
     cpt.updated_at
@@ -170,6 +188,7 @@ SELECT
     'KEPANITIAAN' AS category, 
     cm.organization_event_name AS parent_title, 
     cm.id AS parent_id,
+    cmt.notes,
     cm.user_id,
     cmt.created_at,
     cmt.updated_at
@@ -189,19 +208,28 @@ ALTER TABLE public.committees ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.committee_meetings ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.committee_tasks ENABLE ROW LEVEL SECURITY;
 
--- Profiles: Only owner can read & update
+-- Profiles Policies
+DROP POLICY IF EXISTS "Users can view own profile" ON public.profiles;
 CREATE POLICY "Users can view own profile" ON public.profiles FOR SELECT USING (auth.uid() = id);
+
+DROP POLICY IF EXISTS "Users can update own profile" ON public.profiles;
 CREATE POLICY "Users can update own profile" ON public.profiles FOR UPDATE USING (auth.uid() = id);
 
+DROP POLICY IF EXISTS "Users can insert own profile" ON public.profiles;
+CREATE POLICY "Users can insert own profile" ON public.profiles FOR INSERT WITH CHECK (auth.uid() = id);
+
 -- Semesters
+DROP POLICY IF EXISTS "Users manage own semesters" ON public.semesters;
 CREATE POLICY "Users manage own semesters" ON public.semesters FOR ALL USING (auth.uid() = user_id);
 
 -- Course schedules
+DROP POLICY IF EXISTS "Users manage own course schedules" ON public.course_schedules;
 CREATE POLICY "Users manage own course schedules" ON public.course_schedules FOR ALL USING (
     EXISTS (SELECT 1 FROM public.semesters s WHERE s.id = course_schedules.semester_id AND s.user_id = auth.uid())
 );
 
 -- Course tasks
+DROP POLICY IF EXISTS "Users manage own course tasks" ON public.course_tasks;
 CREATE POLICY "Users manage own course tasks" ON public.course_tasks FOR ALL USING (
     EXISTS (
         SELECT 1 FROM public.course_schedules cs 
@@ -211,22 +239,54 @@ CREATE POLICY "Users manage own course tasks" ON public.course_tasks FOR ALL USI
 );
 
 -- Competitions
+DROP POLICY IF EXISTS "Users manage own competitions" ON public.competitions;
 CREATE POLICY "Users manage own competitions" ON public.competitions FOR ALL USING (auth.uid() = user_id);
 
 -- Competition tasks
+DROP POLICY IF EXISTS "Users manage own competition tasks" ON public.competition_tasks;
 CREATE POLICY "Users manage own competition tasks" ON public.competition_tasks FOR ALL USING (
     EXISTS (SELECT 1 FROM public.competitions c WHERE c.id = competition_tasks.competition_id AND c.user_id = auth.uid())
 );
 
 -- Committees
+DROP POLICY IF EXISTS "Users manage own committees" ON public.committees;
 CREATE POLICY "Users manage own committees" ON public.committees FOR ALL USING (auth.uid() = user_id);
 
 -- Committee meetings
+DROP POLICY IF EXISTS "Users manage own committee meetings" ON public.committee_meetings;
 CREATE POLICY "Users manage own committee meetings" ON public.committee_meetings FOR ALL USING (
     EXISTS (SELECT 1 FROM public.committees cm WHERE cm.id = committee_meetings.committee_id AND cm.user_id = auth.uid())
 );
 
 -- Committee tasks
+DROP POLICY IF EXISTS "Users manage own committee tasks" ON public.committee_tasks;
 CREATE POLICY "Users manage own committee tasks" ON public.committee_tasks FOR ALL USING (
     EXISTS (SELECT 1 FROM public.committees cm WHERE cm.id = committee_tasks.committee_id AND cm.user_id = auth.uid())
 );
+
+-- =====================================================================
+-- 12. AUTOMATIC PROFILE CREATION TRIGGER (auth.users -> public.profiles)
+-- =====================================================================
+CREATE OR REPLACE FUNCTION public.handle_new_user()
+RETURNS TRIGGER AS $$
+BEGIN
+    INSERT INTO public.profiles (id, name, email, major, semester)
+    VALUES (
+        NEW.id,
+        COALESCE(NEW.raw_user_meta_data->>'full_name', NEW.raw_user_meta_data->>'name', split_part(NEW.email, '@', 1)),
+        NEW.email,
+        COALESCE(NEW.raw_user_meta_data->>'major', 'Mahasiswa Onward'),
+        1
+    )
+    ON CONFLICT (id) DO UPDATE SET
+        email = EXCLUDED.email,
+        name = COALESCE(public.profiles.name, EXCLUDED.name);
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+DROP TRIGGER IF EXISTS on_auth_user_created ON auth.users;
+CREATE TRIGGER on_auth_user_created
+    AFTER INSERT ON auth.users
+    FOR EACH ROW EXECUTE FUNCTION public.handle_new_user();
+

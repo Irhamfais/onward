@@ -32,6 +32,7 @@ export async function updateSession(request: NextRequest) {
   } = await supabase.auth.getUser();
 
   const pathname = request.nextUrl.pathname;
+  const isApiRoute = pathname.startsWith('/api');
   const isAuthPage =
     pathname.startsWith('/login') ||
     pathname.startsWith('/register') ||
@@ -40,7 +41,7 @@ export async function updateSession(request: NextRequest) {
     pathname.startsWith('/auth');
 
   // If user is not authenticated and trying to access protected route
-  if (!user && !isAuthPage) {
+  if (!user && !isAuthPage && !isApiRoute) {
     const url = request.nextUrl.clone();
     url.pathname = '/login';
     url.searchParams.set('next', pathname);

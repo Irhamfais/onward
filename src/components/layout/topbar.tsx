@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useMemo } from 'react';
 import Link from 'next/link';
 import { 
   SidebarSimple, 
@@ -14,10 +14,12 @@ import {
   BellRinging,
   LockKey,
   Checks,
-  CaretDown
+  CaretDown,
+  BookOpen
 } from '@phosphor-icons/react';
 import { cn } from '@/lib/utils';
 import { useApp } from '@/context/app-context';
+import { formatDateDisplay, formatCountdown } from '@/lib/date-utils';
 import { ProfileModal } from './profile-modal';
 import { NotificationPreferencesModal } from './notification-preferences-modal';
 
@@ -27,20 +29,29 @@ interface TopbarProps {
   onSearchChange: (query: string) => void;
 }
 
+interface NotifItem {
+  id: string;
+  title: string;
+  subtitle: string;
+  badgeText: string;
+  badgeColor: string;
+  iconType: 'KULIAH' | 'LOMBA' | 'KEPANITIAAN';
+  href: string;
+  isUrgent: boolean;
+  sortTime: number;
+}
+
 export const Topbar: React.FC<TopbarProps> = ({
   onToggleSidebar,
   searchQuery,
   onSearchChange,
 }) => {
-  const { user, profile, signOut } = useApp();
+  const { user, profile, signOut, tasks, meetings, committees } = useApp();
   const [isNotifOpen, setIsNotifOpen] = useState(false);
   const [isProfileOpen, setIsProfileOpen] = useState(false);
   const [isSigningOut, setIsSigningOut] = useState(false);
   const [isProfileModalOpen, setIsProfileModalOpen] = useState(false);
   const [isNotifPrefsModalOpen, setIsNotifPrefsModalOpen] = useState(false);
-
-  // Toggle for mock empty state vs populated list (matching legacy-prototype)
-  const [isNotifMockEmpty, setIsNotifMockEmpty] = useState(false);
 
   const notifRef = useRef<HTMLDivElement>(null);
   const profileRef = useRef<HTMLDivElement>(null);
@@ -70,6 +81,113 @@ export const Topbar: React.FC<TopbarProps> = ({
     document.addEventListener('mousedown', handleClickOutside);
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
+
+  // Compute dynamic notifications from active tasks and meetings
+  const notifications: NotifItem[] = useMemo(() => {
+    const items: NotifItem[] = [];
+
+    // 1. Active / Uncompleted tasks
+    const activeTasks = (tasks || []).filter((t) => t.status !== 'SELESAI');
+    for (const task of activeTasks) {
+      const countdown = formatCountdown(task.deadline, 'Deadline');
+      const targetDate = new Date(task.deadline);
+      const timeMs = isNaN(targetDate.getTime()) ? Date.now() + 86400000 : targetDate.getTime();
+
+      let iconType: 'KULIAH' | 'LOMBA' | 'KEPANITIAAN' = 'KULIAH';
+      let href = '/kuliah';
+      let parentName = task.parent_title || 'Mata Kuliah';
+
+      if (task.category === 'LOMBA') {
+        iconType = 'LOMBA';
+        href = '/lomba';
+        parentName = task.parent_title || 'Lomba';
+      } else if (task.category === 'KEPANITIAAN') {
+        iconType = 'KEPANITIAAN';
+        href = '/kepanitiaan';
+        parentName = task.parent_title || 'Kepanitiaan';
+      }
+
+      const formattedDate = formatDateDisplay(task.deadline);
+      const timePart = task.deadline.includes('T') ? ` • ${task.deadline.split('T')[1].slice(0, 5)}` : '';
+
+      let badgeText = '';
+      let badgeColor = '';
+
+      if (countdown.isOverdue) {
+        badgeText = '⚠️ Lewat Deadline • WhatsApp Gateway';
+        badgeColor = 'text-semantic-urgent font-semibold';
+      } else if (countdown.daysRemaining === 0) {
+        badgeText = '🔥 Deadline Hari Ini • WhatsApp Gateway';
+        badgeColor = 'text-semantic-urgent font-semibold';
+      } else if (countdown.daysRemaining === 1) {
+        badgeText = '⚡ H-1 Besok • WhatsApp Gateway';
+        badgeColor = 'text-semantic-urgent font-medium';
+      } else if (countdown.daysRemaining <= 3) {
+        badgeText = `H-${countdown.daysRemaining} • WhatsApp Gateway`;
+        badgeColor = 'text-[#B45309] font-medium';
+      } else {
+        badgeText = `Tenggat ${countdown.text} • WhatsApp Gateway`;
+        badgeColor = 'text-primary font-medium';
+      }
+
+      items.push({
+        id: `task-${task.id}`,
+        title: countdown.isOverdue 
+          ? `Lewat Deadline: ${task.title}` 
+          : countdown.daysRemaining <= 1 
+          ? `Deadline Segera: ${task.title}` 
+          : task.title,
+        subtitle: `${parentName} • ${formattedDate}${timePart}`,
+        badgeText,
+        badgeColor,
+        iconType,
+        href,
+        isUrgent: countdown.isUrgent,
+        sortTime: timeMs,
+      });
+    }
+
+    // 2. Upcoming / recurring committee meetings
+    const now = Date.now();
+    for (const meeting of meetings || []) {
+      const committee = (committees || []).find((c) => c.id === meeting.committee_id);
+      const committeeName = committee?.organization_event_name || 'Kepanitiaan';
+      const meetingDateTimeStr = meeting.start_time 
+        ? `${meeting.meeting_date}T${meeting.start_time}:00` 
+        : `${meeting.meeting_date}T00:00:00`;
+      const meetingDate = new Date(meetingDateTimeStr);
+      const timeMs = isNaN(meetingDate.getTime()) ? now : meetingDate.getTime();
+
+      // Show meetings that are recurring or within upcoming horizon
+      if (meeting.is_recurring || timeMs >= now - 24 * 60 * 60 * 1000) {
+        const formattedDate = formatDateDisplay(meeting.meeting_date);
+        const locPart = meeting.location ? ` di ${meeting.location}` : '';
+        const timePart = meeting.start_time ? ` • ${meeting.start_time}` : '';
+        const isNear = Math.abs(timeMs - now) < 24 * 60 * 60 * 1000;
+
+        items.push({
+          id: `meeting-${meeting.id}`,
+          title: `Rapat: ${meeting.title}`,
+          subtitle: `${committeeName} • ${formattedDate}${timePart}${locPart}`,
+          badgeText: meeting.is_recurring 
+            ? '🔁 Rapat Berulang • Ingatkan 2 Jam Sebelumnya (WA)' 
+            : isNear
+            ? '📅 Rapat Segera • Ingatkan 2 Jam Sebelumnya (WA)'
+            : '📅 Jadwal Rapat • Ingatkan 2 Jam Sebelumnya (WA)',
+          badgeColor: 'text-category-kepanitiaan font-medium',
+          iconType: 'KEPANITIAAN',
+          href: '/kepanitiaan',
+          isUrgent: isNear,
+          sortTime: timeMs,
+        });
+      }
+    }
+
+    // Sort chronologically ascending
+    items.sort((a, b) => a.sortTime - b.sortTime);
+
+    return items;
+  }, [tasks, meetings, committees]);
 
   const handleSignOut = async () => {
     setIsSigningOut(true);
@@ -138,7 +256,7 @@ export const Topbar: React.FC<TopbarProps> = ({
               title="Notifikasi Pengingat"
             >
               <Bell size={22} />
-              {!isNotifMockEmpty && (
+              {notifications.length > 0 && (
                 <span className="absolute top-2 right-2 w-2 h-2 rounded-full bg-semantic-urgent ring-2 ring-white"></span>
               )}
             </button>
@@ -152,63 +270,65 @@ export const Topbar: React.FC<TopbarProps> = ({
                     </span>
                     <span className={cn(
                       'px-2 py-0.5 rounded-full text-xs font-semibold',
-                      isNotifMockEmpty
+                      notifications.length === 0
                         ? 'bg-status-completed-tint text-status-completed'
                         : 'bg-semantic-urgent-tint text-semantic-urgent'
                     )}>
-                      {isNotifMockEmpty ? '0 Baru' : '3 Baru'}
+                      {notifications.length === 0 ? '0 Pengingat' : `${notifications.length} Pengingat`}
                     </span>
                   </div>
                   <button
                     type="button"
-                    onClick={() => setIsNotifMockEmpty(!isNotifMockEmpty)}
+                    onClick={() => {
+                      setIsNotifOpen(false);
+                      setIsNotifPrefsModalOpen(true);
+                    }}
                     className="text-xs text-primary hover:underline font-medium cursor-pointer"
                   >
-                    Beralih Mock
+                    Preferensi
                   </button>
                 </div>
 
-                {/* Populated Notification Items */}
-                {!isNotifMockEmpty ? (
+                {/* Notification Items List */}
+                {notifications.length > 0 ? (
                   <div className="flex flex-col gap-2.5 max-h-[320px] overflow-y-auto pr-1">
-                    <div className="p-3 rounded-xl bg-semantic-urgent-tint/50 border border-semantic-urgent/20 flex gap-3 items-start">
-                      <div className="w-7 h-7 rounded-lg bg-semantic-urgent text-white flex items-center justify-center shrink-0 mt-0.5">
-                        <Alarm size={16} />
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <p className="text-xs font-semibold text-text-primary">Deadline Besok: Laporan SQL</p>
-                        <p className="text-[11px] text-text-secondary mt-0.5">Sistem Basis Data • Besok, 23:59</p>
-                        <span className="inline-block text-[10px] text-semantic-urgent font-medium mt-1">
-                          H-1 • Notifikasi Email (Resend) & WA (Twilio)
-                        </span>
-                      </div>
-                    </div>
-
-                    <div className="p-3 rounded-xl bg-category-lomba-tint/60 border border-category-lomba/20 flex gap-3 items-start">
-                      <div className="w-7 h-7 rounded-lg bg-category-lomba text-white flex items-center justify-center shrink-0 mt-0.5">
-                        <Trophy size={16} />
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <p className="text-xs font-semibold text-text-primary">Submit 3 Hari Lagi: Pitch Deck</p>
-                        <p className="text-[11px] text-text-secondary mt-0.5">UI/UX Hackathon 2026</p>
-                        <span className="inline-block text-[10px] text-[#B45309] font-medium mt-1">
-                          H-3 • Pengingat WhatsApp Twilio
-                        </span>
-                      </div>
-                    </div>
-
-                    <div className="p-3 rounded-xl bg-category-kepanitiaan-tint/60 border border-category-kepanitiaan/20 flex gap-3 items-start">
-                      <div className="w-7 h-7 rounded-lg bg-category-kepanitiaan text-white flex items-center justify-center shrink-0 mt-0.5">
-                        <Users size={16} />
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <p className="text-xs font-semibold text-text-primary">Rapat Rutin Sie Acara</p>
-                        <p className="text-[11px] text-text-secondary mt-0.5">Kamis, 16:00 via Zoom</p>
-                        <span className="inline-block text-[10px] text-category-kepanitiaan font-medium mt-1">
-                          🔁 Rapat Berulang Tiap Kamis
-                        </span>
-                      </div>
-                    </div>
+                    {notifications.map((notif) => (
+                      <Link
+                        key={notif.id}
+                        href={notif.href}
+                        onClick={() => setIsNotifOpen(false)}
+                        className={cn(
+                          "p-3 rounded-xl border flex gap-3 items-start transition-all hover:scale-[1.01] cursor-pointer",
+                          notif.iconType === 'KULIAH'
+                            ? "bg-category-kuliah-tint/50 border-category-kuliah/20 hover:border-category-kuliah/40"
+                            : notif.iconType === 'LOMBA'
+                            ? "bg-category-lomba-tint/50 border-category-lomba/20 hover:border-category-lomba/40"
+                            : "bg-category-kepanitiaan-tint/50 border-category-kepanitiaan/20 hover:border-category-kepanitiaan/40"
+                        )}
+                      >
+                        <div
+                          className={cn(
+                            "w-7 h-7 rounded-lg text-white flex items-center justify-center shrink-0 mt-0.5",
+                            notif.iconType === 'KULIAH'
+                              ? (notif.isUrgent ? "bg-semantic-urgent" : "bg-category-kuliah")
+                              : notif.iconType === 'LOMBA'
+                              ? "bg-category-lomba"
+                              : "bg-category-kepanitiaan"
+                          )}
+                        >
+                          {notif.iconType === 'KULIAH' && (notif.isUrgent ? <Alarm size={16} /> : <BookOpen size={16} />)}
+                          {notif.iconType === 'LOMBA' && <Trophy size={16} />}
+                          {notif.iconType === 'KEPANITIAAN' && <Users size={16} />}
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <p className="text-xs font-semibold text-text-primary truncate">{notif.title}</p>
+                          <p className="text-[11px] text-text-secondary mt-0.5 truncate">{notif.subtitle}</p>
+                          <span className={cn("inline-block text-[10px] mt-1", notif.badgeColor)}>
+                            {notif.badgeText}
+                          </span>
+                        </div>
+                      </Link>
+                    ))}
                   </div>
                 ) : (
                   /* Empty State View */
@@ -217,7 +337,7 @@ export const Topbar: React.FC<TopbarProps> = ({
                       <Checks size={24} weight="bold" />
                     </div>
                     <p className="text-sm font-semibold text-text-primary">Semua beres!</p>
-                    <p className="text-xs text-text-secondary mt-1">Tidak ada deadline yang mendesak hari ini.</p>
+                    <p className="text-xs text-text-secondary mt-1">Tidak ada deadline tugas atau jadwal rapat yang mendesak.</p>
                   </div>
                 )}
               </div>

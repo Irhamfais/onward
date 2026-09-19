@@ -9,22 +9,19 @@ import {
   BookOpen, 
   Trophy, 
   Users, 
-  CaretDoubleLeft, 
-  CaretDoubleRight,
   X
 } from '@phosphor-icons/react';
 import { cn } from '@/lib/utils';
 
 interface SidebarProps {
   isCollapsed: boolean;
-  onToggleCollapse: () => void;
+  onToggleCollapse?: () => void;
   isMobileOpen: boolean;
   onCloseMobile: () => void;
 }
 
 export const Sidebar: React.FC<SidebarProps> = ({
   isCollapsed,
-  onToggleCollapse,
   isMobileOpen,
   onCloseMobile,
 }) => {
@@ -125,36 +122,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
               );
             })}
           </nav>
-        </div>
-
-        {/* Single Collapse / Restore Control at Bottom */}
-        <div className="pt-4 border-t border-border-subtle hidden md:block">
-          <button
-            type="button"
-            onClick={onToggleCollapse}
-            title={isCollapsed ? 'Kembalikan Sidebar (Ctrl+B)' : 'Ciutkan Sidebar (Ctrl+B)'}
-            className={cn(
-              'group relative flex items-center rounded-xl text-xs font-semibold transition-all w-full py-2',
-              isCollapsed
-                ? 'justify-center bg-primary-tint text-primary px-0'
-                : 'gap-2.5 px-3 text-text-secondary hover:text-primary hover:bg-page-background'
-            )}
-          >
-            {isCollapsed ? (
-              <>
-                <CaretDoubleRight size={18} weight="bold" className="shrink-0 text-primary" />
-                <span className="pointer-events-none absolute left-full ml-3 px-2.5 py-1 rounded-lg bg-text-primary text-white text-xs font-medium shadow-md whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity z-50">
-                  Kembalikan Sidebar (Ctrl+B)
-                </span>
-              </>
-            ) : (
-              <>
-                <CaretDoubleLeft size={16} className="shrink-0" />
-                <span className="whitespace-nowrap">Ciutkan Sidebar</span>
-                <span className="ml-auto text-[10px] text-text-secondary/70 font-mono">Ctrl+B</span>
-              </>
-            )}
-          </button>
         </div>
       </aside>
     </>
