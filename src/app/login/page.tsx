@@ -65,14 +65,22 @@ function LoginForm() {
       }
 
       if (data?.session) {
-        router.push(nextUrl);
-        router.refresh();
+        window.location.href = nextUrl;
       }
     } catch (err: any) {
       setErrorMessage(err?.message || 'Terjadi gangguan koneksi. Silakan coba kembali.');
       setIsLoading(false);
     }
   };
+
+  // If already authenticated, redirect immediately
+  React.useEffect(() => {
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      if (session) {
+        window.location.href = nextUrl;
+      }
+    });
+  }, [nextUrl, supabase]);
 
   return (
     <div className="w-full max-w-md mx-auto">

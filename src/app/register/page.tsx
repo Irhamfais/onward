@@ -92,8 +92,7 @@ export default function RegisterPage() {
 
       // If user session is created immediately (no confirmation needed)
       if (data?.session) {
-        router.push('/');
-        router.refresh();
+        window.location.href = '/';
       } else {
         // Confirmation email was sent
         setIsSuccess(true);
